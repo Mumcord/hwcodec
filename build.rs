@@ -37,6 +37,9 @@
 //! the libvpx ABI versions are checked at runtime and SVT-AV1's configuration struct changes
 //! between releases.
 //!
+//! On docs.rs (`DOCS_RS` is set) no library is built, looked for or linked: the documentation
+//! only needs the bindings, which are generated from the headers in the bundled sources.
+//!
 //! Hardware encoders (`nvenc`, `amf`, `qsv`, `vaapi`; Windows and Linux only, VA-API on Linux
 //! only): the bindings come from the vendor headers bundled in `vendor/include`. The GPU drivers
 //! themselves are loaded at runtime, so nothing is linked for them. The exception is Quick Sync,
@@ -111,6 +114,7 @@ const DAV1D: Library = Library {
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-env-changed={SYSTEM_LIBS}");
+    println!("cargo:rerun-if-env-changed={DOCS_RS}");
     #[cfg(feature = "libvpx")]
     libvpx();
     #[cfg(feature = "svt-av1")]
@@ -121,15 +125,29 @@ fn main() {
     hardware_encoders();
 }
 
+/// Set by docs.rs while it builds the documentation.
+const DOCS_RS: &str = "DOCS_RS";
+
+/// Whether this is a documentation build on docs.rs. Such a build never links, has no network
+/// access and a time limit, so no codec library is built or looked for: the bindings are
+/// generated from the headers in the bundled sources and nothing is linked.
+fn docs_rs() -> bool {
+    env::var_os(DOCS_RS).is_some()
+}
+
 fn msvc() -> bool {
     env::var("CARGO_CFG_TARGET_ENV").is_ok_and(|env| env == "msvc")
 }
 
 #[cfg(feature = "libvpx")]
 fn libvpx() {
-    let vpx = find(&VPX, hwcodec_libvpx_src::VERSION, || {
-        build_libvpx(&hwcodec_libvpx_src::source_dir())
-    });
+    let vpx = if docs_rs() {
+        vec![hwcodec_libvpx_src::source_dir()]
+    } else {
+        find(&VPX, hwcodec_libvpx_src::VERSION, || {
+            build_libvpx(&hwcodec_libvpx_src::source_dir())
+        })
+    };
     generate(
         &vpx,
         bindgen::Builder::default()
@@ -144,9 +162,13 @@ fn libvpx() {
 
 #[cfg(feature = "svt-av1")]
 fn svt_av1() {
-    let svt = find(&SVT_AV1, hwcodec_svt_av1_src::VERSION, || {
-        build_svt_av1(&hwcodec_svt_av1_src::source_dir())
-    });
+    let svt = if docs_rs() {
+        vec![hwcodec_svt_av1_src::source_dir().join("Source/API")]
+    } else {
+        find(&SVT_AV1, hwcodec_svt_av1_src::VERSION, || {
+            build_svt_av1(&hwcodec_svt_av1_src::source_dir())
+        })
+    };
     generate(
         &svt,
         bindgen::Builder::default()
@@ -175,9 +197,13 @@ fn svt_av1() {
 
 #[cfg(feature = "dav1d")]
 fn dav1d() {
-    let dav1d = find(&DAV1D, hwcodec_dav1d_src::VERSION, || {
-        build_dav1d(&hwcodec_dav1d_src::source_dir())
-    });
+    let dav1d = if docs_rs() {
+        vec![hwcodec_dav1d_src::source_dir().join("include")]
+    } else {
+        find(&DAV1D, hwcodec_dav1d_src::VERSION, || {
+            build_dav1d(&hwcodec_dav1d_src::source_dir())
+        })
+    };
     generate(
         &dav1d,
         bindgen::Builder::default()
@@ -278,6 +304,9 @@ fn hardware_encoders() {
 #[cfg(feature = "qsv")]
 fn link_vpl_dispatcher() {
     const NAME: &str = "libvpl (the oneVPL dispatcher)";
+    if docs_rs() {
+        return;
+    }
     println!("cargo:rerun-if-env-changed=HWENC_SDK_DIR");
     let dir = if let Some(dir) = env::var_os("HWENC_SDK_DIR") {
         PathBuf::from(dir)

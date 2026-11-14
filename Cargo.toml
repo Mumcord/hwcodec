@@ -25,6 +25,13 @@ include = [
     "/vendor/**",
 ]
 
+# docs.rs builds without network access and with a time limit. Its build sets DOCS_RS, which
+# makes build.rs generate the bindings from the bundled headers without building or linking a
+# codec library, so the documentation covers every feature. One target is enough: the public
+# interface is the same on every system.
+[package.metadata.docs.rs]
+targets = ["x86_64-unknown-linux-gnu"]
+
 [workspace]
 members = ["sys/*"]
 
