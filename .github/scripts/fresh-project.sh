@@ -87,11 +87,15 @@ if [[ -z $output ]]; then
   fail "hwcodec's build script output was not found."
 fi
 [[ $(wc -l <<< "$output") -eq 1 ]] || fail "more than one build of hwcodec: $output"
-out_dir=$(dirname "$output")/out
-if [[ ! -d $out_dir ]]; then
+# cargo notes the script's OUT_DIR in the file root-output beside its output.
+out_native=$(tr '\\' '/' < "$(dirname "$output")/root-output") || {
   show_layout
-  fail "no OUT_DIR next to $output."
-fi
+  fail "no root-output next to $output."
+}
+out_dir=$(unix_path "$out_native")
+[[ -d $out_dir ]] || fail "the OUT_DIR $out_native does not exist."
+[[ $out_native == *"$(basename "$parent")/fresh/target/"* ]] ||
+  fail "the OUT_DIR $out_native is not in the fresh project's target directory."
 for library in vpx SvtAv1Enc dav1d; do
   grep -q "^cargo:rustc-link-lib=static=$library\$" "$output" || fail "$library was not linked statically."
 done
@@ -100,7 +104,7 @@ searches=$(sed -n 's/^cargo:rustc-link-search=native=//p' "$output" | tr '\\' '/
 
 case "$mode" in
   bundled)
-    expected="$(basename "$parent")/fresh/$out_dir/"
+    expected="$out_native/"
     source="built from the bundled sources (sys/) in the project's own target directory"
     logs=$(find "$out_dir" -name hwcodec-build.log | wc -l)
     [[ $logs -ge 3 ]] || fail "only $logs build logs of bundled sources in $out_dir."
@@ -111,7 +115,7 @@ case "$mode" in
     [[ ! -e $out_dir/native-libs ]] || fail "the build unpacked a download into $out_dir/native-libs."
     ;;
   downloaded)
-    expected="/fresh/$out_dir/native-libs/"
+    expected="$out_native/native-libs/"
     pin=$(grep -A1 '^const PREBUILT_SHA256' "$root/build.rs" | grep -oE '[0-9a-f]{64}')
     tag=$(sed -n 's/^const PREBUILT_TAG: &str = "\(.*\)";$/\1/p' "$root/build.rs")
     # The build script writes this file after it downloaded, checked and unpacked the archive.
