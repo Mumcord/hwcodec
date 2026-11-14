@@ -25,10 +25,25 @@ All five always carry the same version. The four source packages add the version
 
 Published versions can never be replaced or removed from crates.io (only "yanked", which hides them from new users). If something is wrong after publishing, fix it and release the next patch version.
 
+## Windows: the prebuilt codec libraries
+
+On Windows the crate's build does not compile the bundled sources. It downloads one archive with libvpx, SVT-AV1, dav1d and the oneVPL dispatcher, prebuilt for `x86_64-pc-windows-msvc`, and checks it against a SHA-256 that is fixed in `build.rs`.
+
+- **Where it lives:** in a GitHub release of this repository named `native-libs-<number>` (file `hwcodec-native-libs-<number>-x86_64-pc-windows-msvc.tar.gz`). These releases are separate from the crate versions (`vX.Y.Z`) and are never marked "latest". They must never be deleted or changed: every published crate version that pins one would stop building on Windows.
+- **What pins it:** `PREBUILT_TAG` and `PREBUILT_SHA256` in `build.rs`.
+- **When a new one is needed:** whenever a library under `sys/` is updated, or `.github/scripts/build-windows-libs.sh` changes how they are built. CI (job "windows-latest (downloaded libraries)") and the release pipeline fail while the pinned archive holds other library versions than `sys/`.
+
+Publishing a new archive:
+
+1. On the branch with the change: Actions → Windows codec libraries → Run workflow, choose the branch, leave `tag` empty. This only builds; check that it is green.
+2. Run it again with `tag` set to the next free number, e.g. `native-libs-2`. This creates the release with the archive and a `.sha256` file. The summary of the run shows the SHA-256.
+3. Put the new tag and SHA-256 into `PREBUILT_TAG` and `PREBUILT_SHA256` in `build.rs`, update the address in the README, and commit that on the same branch.
+4. CI on Windows must be green before the branch is merged.
+
 ## What the pipeline does
 
 1. **Check:** the tag equals the version of all five packages, and `CHANGELOG.md` has a section for that version. Otherwise it stops before anything is published.
-2. **Tests:** the complete CI checks (formatting, Clippy, tests, documentation, examples, licence check, package check) on Linux and macOS.
+2. **Tests:** the complete CI checks (formatting, Clippy, tests, documentation, examples, licence check, package check) on Linux, macOS and Windows, including a Windows build that downloads the prebuilt libraries. In parallel it checks that the prebuilt Windows libraries pinned in `build.rs` can be downloaded, have the pinned checksum and hold the library versions of this release.
 3. **Publish to crates.io** in dependency order: `hwcodec-libvpx-src`, `hwcodec-svt-av1-src`, `hwcodec-dav1d-src`, `hwcodec-libvpl-src`, then `hwcodec`. After each package it waits until crates.io offers it for download. A version that is already on crates.io is skipped, so a release that stopped half-way can simply be run again (Actions → the failed run → Re-run failed jobs).
 4. **GitHub release** for the tag, with the changelog section as notes.
 

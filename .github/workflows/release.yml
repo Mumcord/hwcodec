@@ -106,9 +106,28 @@ jobs:
     needs: check
     uses: ./.github/workflows/ci.yml
 
+  # On Windows, hwcodec's build downloads the codec libraries prebuilt, from a release of this
+  # repository of its own (native-libs-<n>, made by the workflow "Windows codec libraries") that
+  # build.rs pins by tag and SHA-256. They are not attached to the crate's release: the checksum
+  # has to be inside the crate before it is published. This job only reads: it makes sure the
+  # pinned archive exists, has the pinned checksum and holds the library versions this release
+  # bundles, before anything is published.
+  windows-prebuilt:
+    name: Windows prebuilt libraries
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check the pinned archive
+        run: .github/scripts/check-windows-prebuilt.sh
+
   publish:
     name: Publish to crates.io
-    needs: [check, tests]
+    needs: [check, tests, windows-prebuilt]
     runs-on: ubuntu-latest
     timeout-minutes: 45
     # crates.io Trusted Publishing is registered for this workflow file and this environment.
@@ -217,15 +236,6 @@ jobs:
             echo "::error::$name $version did not appear in the crates.io index within 10 minutes. Run the workflow again from the tag; versions that are already published are skipped."
             exit 1
           done
-
-  # ---------------------------------------------------------------------------------------------
-  # SLOT: Windows prebuilt codec libraries
-  #
-  # A job `windows-prebuilt` belongs here: it builds the codec libraries for Windows and hands
-  # them to the `github-release` job below, which attaches them to the release (hwcodec's build
-  # downloads them on Windows instead of building from source). Not built yet. When it is added,
-  # list it under `needs` of `github-release`.
-  # ---------------------------------------------------------------------------------------------
 
   github-release:
     name: GitHub release
