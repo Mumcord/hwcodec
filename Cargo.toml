@@ -29,8 +29,9 @@ dav1d = ["dep:hwcodec-dav1d-src"]
 log = "0.4"
 thiserror = "2"
 
-# Loads the GPU driver libraries for the hardware encoders at runtime (none on macOS). 0.8, not
-# 0.9: bindgen's generated loaders (build.rs) are written against the 0.8 API.
+# Loads the GPU driver libraries for the hardware encoders at runtime (none on macOS). 0.9 builds
+# and passes CI on Linux and macOS; the loaders that bindgen generates in build.rs for Windows
+# are not yet covered by CI.
 [target.'cfg(not(target_os = "macos"))'.dependencies]
 libloading = "0.9"
 
