@@ -159,7 +159,7 @@ Everything not listed as tested is untested.
 
 ### Reporting hardware results
 
-Run the detection example (`cargo run --example detect`) and open an issue with its output, your operating system, GPU and driver version, and whether encoding worked:
+Run the detection example (`cargo run --example detect`) and open an issue with its output, your operating system, GPU and driver version, and whether encoding worked.
 
 The output lists each encoder with its status, device and driver version. If an encoder is reported as working but produces a wrong picture, or reported as unavailable although it should work, say so. Both are useful.
 
