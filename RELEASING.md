@@ -36,13 +36,9 @@ The log of the publish job says in its first lines whether the run is a **dry ru
 
 ## One-time setup (maintainer)
 
-### Before the first release: a crates.io token
+### The first release: a crates.io token
 
-crates.io can only trust this repository for a package once the package exists. The very first publish therefore needs a personal token:
-
-1. Sign in on <https://crates.io> with the GitHub account that shall own the packages.
-2. Account Settings → API Tokens → New Token. Scopes: `publish-new` and `publish-update`. Give it a short expiry (for example 7 days).
-3. In this repository: Settings → Secrets and variables → Actions → New repository secret, name `CARGO_REGISTRY_TOKEN`, value: the token.
+crates.io can only trust this repository for a package once the package exists. The very first publish therefore uses a crates.io API token. It is stored as the organisation secret `CARGO_REGISTRY_TOKEN`, which this repository can read; nothing has to be set up for the first release. The token needs the scopes `publish-new` and `publish-update`.
 
 ### After the first release: Trusted Publishing
 
@@ -50,12 +46,14 @@ With Trusted Publishing, crates.io accepts a publish because it comes from this 
 
 1. On crates.io open the package → Settings → Trusted Publishing → Add → GitHub.
 2. Fill in: repository owner `Mumcord`, repository name `hwcodec`, workflow filename `release.yml`, environment `release`.
-3. When all five are registered, delete the repository secret `CARGO_REGISTRY_TOKEN` and revoke the token on crates.io.
+3. When all five are registered, take this repository off the organisation secret `CARGO_REGISTRY_TOKEN` (organisation Settings → Secrets and variables → Actions → the secret → repository access), or delete the secret and revoke the token on crates.io if nothing else uses it.
 
-From then on the pipeline asks crates.io for a token that is valid for 30 minutes on each release. As long as the secret `CARGO_REGISTRY_TOKEN` exists, the pipeline uses it instead.
+From then on the pipeline asks crates.io for a token that is valid for 30 minutes on each release. As long as this repository can read the secret `CARGO_REGISTRY_TOKEN`, the pipeline uses it instead.
 
 It is also worth adding a second owner to each package on crates.io (package → Settings → Owners), so that the packages do not depend on one account.
 
 ### Claude review
 
-The workflow `.github/workflows/claude-review.yml` reviews pull requests. It needs the repository secret `CLAUDE_CODE_OAUTH_TOKEN` (created locally with `claude setup-token`). Without the secret the review is skipped with a warning; pull requests do not fail because of it.
+The workflow `.github/workflows/claude-review.yml` reviews pull requests from branches of this repository. It uses the organisation secret `CLAUDE_CODE_OAUTH_TOKEN` (created with `claude setup-token`). If the token is missing or expired the review is skipped with a warning; pull requests do not fail because of it.
+
+A review without findings approves the pull request; a review with findings requests changes. A pull request that changes files under `.github/` is reviewed but never approved automatically. The workflow never merges.
