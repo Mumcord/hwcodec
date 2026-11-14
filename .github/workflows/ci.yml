@@ -6,6 +6,8 @@ on:
     branches: [main]
   # The release workflow runs these checks as its test suite.
   workflow_call:
+  # By hand, to check a branch that has no pull request yet.
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -23,9 +25,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Windows is not in the matrix yet: the bundled sources are not built there, and the
-        # download of prebuilt codec libraries that replaces the source build is still to come.
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -36,8 +36,9 @@ jobs:
           components: rustfmt, clippy
 
       # The build compiles the bundled codec sources, which needs a C/C++ compiler, CMake, NASM,
-      # Meson and Ninja, and libclang for the bindings.
+      # Meson and Ninja, and libclang for the bindings. Windows is handled below.
       - name: Install build tools
+        if: runner.os != 'Windows'
         shell: bash
         run: |
           case "$RUNNER_OS" in
@@ -59,6 +60,7 @@ jobs:
       # so only the first run after a change to the sources pays for them. The build itself is
       # unchanged: every step still runs the complete bundled build.
       - name: Configure the compiler cache
+        if: runner.os != 'Windows'
         shell: bash
         run: |
           {
@@ -71,11 +73,51 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - name: Restore the compiler cache
+        if: runner.os != 'Windows'
         id: ccache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/ccache
           key: ccache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('sys/**', 'build.rs') }}
+
+      # hwcodec's build script does not compile the bundled sources on Windows. This job builds
+      # them with the script that also makes the downloadable archive, once per change to the
+      # sources, and hands them to the build through the variables for prebuilt libraries.
+      - name: Restore the Windows codec libraries
+        if: runner.os == 'Windows'
+        id: windows-libs
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/native-libs
+          key: native-libs-${{ runner.arch }}-${{ hashFiles('sys/**', '.github/scripts/build-windows-libs.sh', '.github/actions/windows-build-tools/action.yml') }}
+
+      - name: Install the Windows build tools
+        if: runner.os == 'Windows' && steps.windows-libs.outputs.cache-hit != 'true'
+        uses: ./.github/actions/windows-build-tools
+
+      - name: Build the Windows codec libraries
+        if: runner.os == 'Windows' && steps.windows-libs.outputs.cache-hit != 'true'
+        shell: bash
+        run: .github/scripts/build-windows-libs.sh "$RUNNER_TEMP/native-libs"
+
+      - name: Save the Windows codec libraries
+        if: runner.os == 'Windows' && steps.windows-libs.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/native-libs
+          key: ${{ steps.windows-libs.outputs.cache-primary-key }}
+
+      - name: Point the build at the Windows codec libraries
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          libs=$(cygpath -m "$RUNNER_TEMP/native-libs")
+          {
+            echo "LIBVPX_STATIC_DIR=$libs/libvpx_static"
+            echo "SVTAV1_STATIC_DIR=$libs/svtav1_static"
+            echo "DAV1D_STATIC_DIR=$libs/dav1d_static"
+            echo "HWENC_SDK_DIR=$libs/hwenc_sdk"
+          } >> "$GITHUB_ENV"
 
       - name: Format
         run: cargo fmt --all --check
@@ -115,13 +157,13 @@ jobs:
         run: cargo package --workspace
 
       - name: Compiler cache statistics
-        if: always()
+        if: always() && runner.os != 'Windows'
         run: ccache --show-stats
 
       # Only main saves: a cache saved by a pull request is not visible to other branches, and
       # the key only changes with the bundled sources.
       - name: Save the compiler cache
-        if: github.ref == 'refs/heads/main' && steps.ccache.outputs.cache-hit != 'true'
+        if: runner.os != 'Windows' && github.ref == 'refs/heads/main' && steps.ccache.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/ccache
