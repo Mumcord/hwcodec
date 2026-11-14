@@ -1,4 +1,4 @@
-## What changes and why
+## What changes, and why
 
 ## Checklist
 
