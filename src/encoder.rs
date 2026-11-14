@@ -15,7 +15,7 @@ const MAX_THREADS: u32 = 64;
 
 /// How libvpx spreads the frames over a number of temporal layers.
 struct Layering {
-    mode: u32,
+    mode: c_int,
     /// Layer of each frame of one period.
     pattern: &'static [u32],
     /// Per layer, every how many frames one of that layer or below comes.
@@ -28,20 +28,20 @@ struct Layering {
 fn layering(layers: u8) -> Layering {
     match layers {
         1 => Layering {
-            mode: ffi::VP9E_TEMPORAL_LAYERING_MODE_NOLAYERING,
+            mode: ffi::VP9E_TEMPORAL_LAYERING_MODE_NOLAYERING as c_int,
             pattern: &[0],
             decimator: &[1],
             bitrate_percent: &[100],
         },
         2 => Layering {
-            mode: ffi::VP9E_TEMPORAL_LAYERING_MODE_0101,
+            mode: ffi::VP9E_TEMPORAL_LAYERING_MODE_0101 as c_int,
             pattern: &[0, 1],
             decimator: &[2, 1],
             bitrate_percent: &[60, 100],
         },
         // Layer 0 every 4th frame, layer 1 in between, layer 2 on every odd frame.
         _ => Layering {
-            mode: ffi::VP9E_TEMPORAL_LAYERING_MODE_0212,
+            mode: ffi::VP9E_TEMPORAL_LAYERING_MODE_0212 as c_int,
             pattern: &[0, 2, 1, 2],
             decimator: &[4, 2, 1],
             bitrate_percent: &[40, 60, 100],
@@ -131,7 +131,7 @@ impl Vp9Encoder {
             cfg.ts_periodicity = layering.pattern.len() as u32;
             cfg.ts_layer_id[..layering.pattern.len()].copy_from_slice(layering.pattern);
             cfg.ts_rate_decimator[..layering.decimator.len()].copy_from_slice(layering.decimator);
-            cfg.temporal_layering_mode = layering.mode as c_int;
+            cfg.temporal_layering_mode = layering.mode;
             set_layer_bitrates(&mut cfg, config.bitrate_kbps, layers);
 
             let mut ctx = Box::new(MaybeUninit::<ffi::vpx_codec_ctx_t>::zeroed().assume_init());
