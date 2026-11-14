@@ -53,7 +53,7 @@ Two examples in `examples/` show complete programs:
 - `cargo run --example detect` prints which hardware encoders work for AV1 and VP9 and why the others do not.
 - `cargo run --release --example encode_decode` encodes and decodes pictures in software and shows `open_best_encoder` with the default and a custom order. It needs no GPU.
 
-`examples/encode_speed.rs` measures software encode speed (`cargo run --release --example encode_speed -- [vp9|av1|av1-text] [WIDTHxHEIGHT] [FPS]`). The API documentation (`cargo doc --open`) covers the rest.
+`examples/encode_speed.rs` measures software encode speed (`cargo run --release --example encode_speed -- [vp9|av1|av1-text] [WIDTHxHEIGHT] [FPS]`). `examples/rgba_speed.rs` measures the I420 to RGBA conversion and needs no codec feature (`cargo run --release --no-default-features --example rgba_speed`). The API documentation (`cargo doc --open`) covers the rest.
 
 ## Operating systems
 
