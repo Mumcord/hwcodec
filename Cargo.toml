@@ -32,7 +32,7 @@ thiserror = "2"
 # Loads the GPU driver libraries for the hardware encoders at runtime (none on macOS). 0.8, not
 # 0.9: bindgen's generated loaders (build.rs) are written against the 0.8 API.
 [target.'cfg(not(target_os = "macos"))'.dependencies]
-libloading = "0.8"
+libloading = "0.9"
 
 [build-dependencies]
 bindgen = "0.73"
