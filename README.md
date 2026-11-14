@@ -186,3 +186,4 @@ The bundled third-party sources and headers keep their own licences:
 The licence texts are in `vendor/licenses/` and in the source packages.
 
 <!-- protection check (throwaway) -->
+<!-- second commit -->
