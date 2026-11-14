@@ -6,6 +6,11 @@
 #            feature set: no feature at all, every software codec alone, the phone set, the
 #            software codecs without hardware encoders, and the full set without one hardware
 #            vendor at a time. The full set is what the other CI steps check.
+#            The codec libraries are built from the bundled sources once, by a build with the
+#            default features (the same one the other CI steps run), and every set links those
+#            through the variables for prebuilt libraries. Otherwise each set would compile
+#            the bundled sources again, which takes minutes per set. With
+#            HWCODEC_USE_SYSTEM_LIBS=1 or the variables already set, those libraries are used.
 #   phones   `cargo check` and Clippy without any feature for Android and iOS. The build script
 #            is given a libclang, a pkg-config and C compilers that do not exist, so the step
 #            fails if a build without features ever reaches for native code again. Needs the
@@ -42,8 +47,36 @@ endgroup() {
   if [ -n "${GITHUB_ACTIONS:-}" ]; then echo "::endgroup::"; fi
 }
 
+# Points the variables for prebuilt libraries at what a build with the default features built
+# from the bundled sources. cargo reports the library directories of that build itself, so no
+# layout of the target directory is assumed.
+reuse_bundled_libraries() {
+  local directory prefix
+  while read -r directory; do
+    prefix=$(dirname "$directory")
+    if [ -f "$directory/libvpx.a" ]; then export LIBVPX_STATIC_DIR=$prefix; fi
+    if [ -f "$directory/libSvtAv1Enc.a" ]; then export SVTAV1_STATIC_DIR=$prefix; fi
+    if [ -f "$directory/libdav1d.a" ]; then export DAV1D_STATIC_DIR=$prefix; fi
+    if [ -f "$directory/libvpl.a" ]; then export HWENC_SDK_DIR=$prefix; fi
+  done < <(cargo build --message-format=json |
+    jq -r 'select(.reason == "build-script-executed") | .linked_paths[]' |
+    sed 's/^native=//')
+  for variable in LIBVPX_STATIC_DIR SVTAV1_STATIC_DIR DAV1D_STATIC_DIR HWENC_SDK_DIR; do
+    if [ -z "${!variable:-}" ]; then
+      echo "::error::the build with the default features left no library for $variable."
+      exit 1
+    fi
+    echo "$variable=${!variable}"
+  done
+}
+
 case "$mode" in
   sets)
+    if [ -z "${HWCODEC_USE_SYSTEM_LIBS:-}${LIBVPX_STATIC_DIR:-}${SVTAV1_STATIC_DIR:-}${DAV1D_STATIC_DIR:-}${HWENC_SDK_DIR:-}" ]; then
+      group "build the bundled sources once"
+      reuse_bundled_libraries
+      endgroup
+    fi
     for set in "${sets[@]}"; do
       group "features: ${set:-none}"
       cargo clippy --all-targets --no-default-features --features "$set" -- -D warnings

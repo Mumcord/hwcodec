@@ -137,8 +137,8 @@ jobs:
         run: cargo build --examples
 
       # Builds with fewer cargo features than the default, as the phone builds of an application
-      # use the crate: Clippy, tests and documentation for each reduced set. Each set compiles
-      # the bundled sources of its codecs again, which the compiler cache keeps short.
+      # use the crate: Clippy, tests and documentation for each reduced set. The sets link the
+      # codec libraries that the steps above built from the bundled sources.
       - name: Reduced feature sets
         if: runner.os == 'Linux'
         run: .github/scripts/feature-sets.sh sets
