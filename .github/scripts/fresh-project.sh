@@ -12,11 +12,13 @@
 #   bundled     built from the sources under sys/ (Linux and macOS)
 #   packaged    the companion package with the prebuilt libraries, no download (Windows)
 #   downloaded  the archive pinned in build.rs, downloaded by the build script (Windows)
+#   system      the system's libraries, with HWCODEC_USE_SYSTEM_LIBS=1; not what CI proves,
+#               but it lets the script run on a machine without the tools for the bundled build
 #
-# Usage: fresh-project.sh bundled|packaged|downloaded
+# Usage: fresh-project.sh bundled|packaged|downloaded|system
 set -euo pipefail
 
-mode=${1:?usage: fresh-project.sh bundled|packaged|downloaded}
+mode=${1:?usage: fresh-project.sh bundled|packaged|downloaded|system}
 root=$(cd "$(dirname "$0")/../.." && pwd)
 
 fail() {
@@ -34,11 +36,15 @@ unix_path() {
 
 # A variable that selects other libraries would make this a different build than the default.
 for variable in HWCODEC_USE_SYSTEM_LIBS LIBVPX_STATIC_DIR SVTAV1_STATIC_DIR DAV1D_STATIC_DIR HWENC_SDK_DIR; do
+  [[ $mode == system && $variable == HWCODEC_USE_SYSTEM_LIBS ]] && continue
   [[ -z ${!variable:-} ]] || fail "$variable is set; the check must run the default build."
 done
 packaged_marker="$root/sys/prebuilt-x86_64-pc-windows-msvc/prebuilt/README.txt"
 case "$mode" in
   bundled) ;;
+  system)
+    [[ ${HWCODEC_USE_SYSTEM_LIBS:-} == 1 ]] || fail "HWCODEC_USE_SYSTEM_LIBS=1 must be set."
+    ;;
   packaged)
     [[ ${HWCODEC_NO_DOWNLOAD:-} == 1 ]] || fail "HWCODEC_NO_DOWNLOAD=1 must be set, so that a download would fail the build."
     [[ -f $packaged_marker ]] || fail "the companion package holds no libraries; run fetch-windows-prebuilt.sh first."
@@ -74,33 +80,48 @@ for codec in AV1 VP9; do
 done
 
 # What hwcodec's build script told cargo: one search path and one library per codec library.
-# cargo keeps that output next to the script's OUT_DIR; the file name and the directories
-# above it differ between cargo versions, so it is searched for instead of spelled out.
+# cargo records that output and, beside it in the file root-output, the script's OUT_DIR.
+# Where it keeps both differs between cargo versions (build/hwcodec-<hash>/output up to 1.99,
+# build/hwcodec/<hash>/run/stdout since 1.100), so the output is searched for by a line that
+# only hwcodec's build script prints, and the OUT_DIR is read instead of assumed.
 show_layout() {
   echo "Files of hwcodec's build script below target/release/build:"
   find target/release/build -path '*hwcodec*' -type f -not -path '*/out/*' | sort
 }
 output=$(find target/release/build -path '*hwcodec*' -type f \( -name output -o -name stdout \) \
-  -not -path '*/out/*' -exec grep -l "^cargo:rustc-link-lib=static=vpx" {} +) || true
+  -not -path '*/out/*' -exec grep -l "^cargo:rerun-if-env-changed=HWCODEC_USE_SYSTEM_LIBS" {} +) || true
 if [[ -z $output ]]; then
   show_layout
   fail "hwcodec's build script output was not found."
 fi
 [[ $(wc -l <<< "$output") -eq 1 ]] || fail "more than one build of hwcodec: $output"
-out_dir=$(dirname "$output")/out
-if [[ ! -d $out_dir ]]; then
+# cargo notes the script's OUT_DIR in the file root-output beside its output.
+if [[ ! -f $(dirname "$output")/root-output ]]; then
   show_layout
-  fail "no OUT_DIR next to $output."
+  fail "no root-output next to $output."
 fi
-for library in vpx SvtAv1Enc dav1d; do
-  grep -q "^cargo:rustc-link-lib=static=$library\$" "$output" || fail "$library was not linked statically."
-done
-searches=$(sed -n 's/^cargo:rustc-link-search=native=//p' "$output" | tr '\\' '/' | sort -u)
-[[ -n $searches ]] || fail "the build script named no library directory."
+out_native=$(tr -d '\r\n' < "$(dirname "$output")/root-output" | tr '\\' '/')
+out_dir=$(unix_path "$out_native")
+[[ -d $out_dir ]] || fail "the OUT_DIR $out_native does not exist."
+[[ $out_native == *"$(basename "$parent")/fresh/target/"* ]] ||
+  fail "the OUT_DIR $out_native is not in the fresh project's target directory."
+echo "build script output: $output"
+echo "OUT_DIR: $out_native"
+searches=$(sed -n 's/^cargo:rustc-link-search=native=//p' "$output" | tr -d '\r' | tr '\\' '/' | sort -u)
+if [[ $mode != system ]]; then
+  for library in vpx SvtAv1Enc dav1d; do
+    grep -q "^cargo:rustc-link-lib=static=$library" "$output" || fail "$library was not linked statically."
+  done
+  [[ -n $searches ]] || fail "the build script named no library directory."
+fi
 
 case "$mode" in
+  system)
+    expected=""
+    source="the system's (HWCODEC_USE_SYSTEM_LIBS=1)"
+    ;;
   bundled)
-    expected="$(basename "$parent")/fresh/$out_dir/"
+    expected="$out_native/"
     source="built from the bundled sources (sys/) in the project's own target directory"
     logs=$(find "$out_dir" -name hwcodec-build.log | wc -l)
     [[ $logs -ge 3 ]] || fail "only $logs build logs of bundled sources in $out_dir."
@@ -111,7 +132,7 @@ case "$mode" in
     [[ ! -e $out_dir/native-libs ]] || fail "the build unpacked a download into $out_dir/native-libs."
     ;;
   downloaded)
-    expected="/fresh/$out_dir/native-libs/"
+    expected="$out_native/native-libs/"
     pin=$(grep -A1 '^const PREBUILT_SHA256' "$root/build.rs" | grep -oE '[0-9a-f]{64}')
     tag=$(sed -n 's/^const PREBUILT_TAG: &str = "\(.*\)";$/\1/p' "$root/build.rs")
     # The build script writes this file after it downloaded, checked and unpacked the archive.
@@ -121,6 +142,7 @@ case "$mode" in
     ;;
 esac
 while read -r search; do
+  [[ -n $search ]] || continue
   [[ $search == *"$expected"* ]] || fail "a library was linked from $search, which is not $source."
   echo "linked from $search"
 done <<< "$searches"
