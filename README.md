@@ -1,0 +1,165 @@
+# hwcodec
+
+Realtime AV1 and VP9 video encoding and decoding in Rust, behind one interface.
+
+- **Hardware encoding:** NVIDIA NVENC, Intel Quick Sync (oneVPL), AMD AMF and VA-API (Linux). Which one exists depends on the operating system, see [Operating systems](#operating-systems).
+- **Software encoding:** SVT-AV1 (AV1) and libvpx (VP9).
+- **Decoding:** dav1d (AV1) and libvpx (VP9), software only in 0.1.
+- No FFmpeg. Driver libraries are loaded at runtime, so a binary starts on machines without the GPU.
+- Detection tells you which encoder works on this machine and, if not, why.
+
+Licence: `MIT OR Apache-2.0`. Minimum Rust version: 1.90.
+
+> **Status: 0.1, best effort.** Only part of the hardware was tested by the maintainers. See [Tested hardware](#tested-hardware).
+
+## Quick start
+
+```toml
+[dependencies]
+hwcodec = "0.1"
+```
+
+Detect what works on this machine:
+
+```rust
+use hwcodec::{Codec, detect_encoders};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    for report in detect_encoders(Codec::Av1) {
+        println!("{}: {}", report.encoder, report.status);
+    }
+    Ok(())
+}
+```
+
+Open the best available encoder (hardware first, software as fallback):
+
+```rust
+use hwcodec::{Codec, EncoderConfig, open_best_encoder};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let config = EncoderConfig::new(1920, 1080, 60, 6000);
+    // `None` is the default order: hardware first, software last.
+    let (kind, _encoder) = open_best_encoder(Codec::Av1, &config, None)?;
+    println!("using {kind:?}");
+    Ok(())
+}
+```
+
+Pass `Some(&[EncoderKind::Software])` (or any other list) instead of `None` for your own order; `default_order(codec)` returns the default one.
+
+Two examples in `examples/` show complete programs:
+
+- `cargo run --example detect` prints which hardware encoders work for AV1 and VP9 and why the others do not.
+- `cargo run --release --example encode_decode` encodes and decodes pictures in software and shows `open_best_encoder` with the default and a custom order. It needs no GPU.
+
+`examples/encode_speed.rs` measures software encode speed (`cargo run --release --example encode_speed -- [vp9|av1|av1-text] [WIDTHxHEIGHT] [FPS]`). The API documentation (`cargo doc --open`) covers the rest.
+
+## Operating systems
+
+| Encoder | Windows | Linux | macOS | Codecs |
+| --- | --- | --- | --- | --- |
+| NVIDIA NVENC | yes | yes | – | AV1 |
+| VA-API | – | yes | – | AV1, VP9 |
+| AMD AMF | yes | – | – | AV1 |
+| Intel Quick Sync | yes | – | – | AV1, VP9 |
+| Software (SVT-AV1, libvpx) | yes | yes | yes | AV1, VP9 |
+
+On Linux, AMD and Intel graphics cards are used through VA-API (Mesa or the Intel media driver). AMF and Quick Sync are Windows only. macOS has software encoding only.
+
+## Cargo features
+
+All features are on by default. Turn off what you do not need to shorten the first build.
+
+| Feature | Enables |
+| --- | --- |
+| `nvenc` | NVIDIA NVENC (Windows, Linux) |
+| `amf` | AMD AMF (Windows) |
+| `qsv` | Intel Quick Sync (Windows) |
+| `vaapi` | VA-API (Linux) |
+| `svt-av1` | Software AV1 encoder |
+| `libvpx` | VP9 encoder and decoder |
+| `dav1d` | AV1 decoder |
+
+Hardware features compile to nothing on platforms that do not have them.
+
+## Build requirements
+
+By default the codec libraries are built from the sources bundled in the `hwcodec-*-src` packages, without network access. The **first build takes several minutes**; later builds reuse the result. You need:
+
+- A C and C++ compiler, `make`, `perl`, `nasm` (x86 and x86-64 only), `cmake`, `meson`, `ninja` and libclang (for the bindings).
+- If a tool is missing, the build stops with a message that names it.
+
+**Windows:** the source build is not available yet. Today you must supply prebuilt libraries with the variables below. Downloading prebuilt libraries during the build is planned. Cross-compiling also needs the variables.
+
+### Prebuilt and system libraries
+
+Use your own libraries instead of building the bundled sources. A prebuilt library wins over the system switch, which wins over the source build.
+
+| Variable | Library | Expects |
+| --- | --- | --- |
+| `LIBVPX_STATIC_DIR` | libvpx | `include/vpx/`, `lib/libvpx.a` (MSVC: `lib/vpx.lib`) |
+| `SVTAV1_STATIC_DIR` | SVT-AV1 | `include/svt-av1/`, `lib/libSvtAv1Enc.a` (MSVC: `lib/SvtAv1Enc.lib`) |
+| `DAV1D_STATIC_DIR` | dav1d | `include/dav1d/`, `lib/libdav1d.a` (MSVC: `lib/dav1d.lib`) |
+| `HWENC_SDK_DIR` | oneVPL dispatcher (Quick Sync) | `lib/libvpl.a` (MSVC: `lib/vpl.lib`) |
+
+Set `HWCODEC_USE_SYSTEM_LIBS=1` to use the libraries installed on the system, found with `pkg-config`. Leave the variable unset to turn it off; do not set it to `0` or an empty value.
+
+## Limits
+
+- Tuned for live video (low latency). Other uses are not a goal in 0.1.
+- AV1 and VP9 only, by design. Contributions for H.264 and H.265 are welcome.
+- Decoding is software only in 0.1.
+- macOS: software only. Hardware encoding and decoding through VideoToolbox is a planned extension.
+- FreeBSD: best effort, not tested automatically.
+
+## Planned for 0.2
+
+- Hardware decoding.
+- A quality preset next to the live preset.
+
+## Support
+
+Best effort. Issues and pull requests are read, but there is no guaranteed response time and no guarantee that every driver version works.
+
+## Tested hardware
+
+Everything not listed as tested is untested.
+
+| Path | Codec | Hardware | OS | Driver | Date | Result |
+| --- | --- | --- | --- | --- | --- | --- |
+| VA-API | AV1 encode | AMD Radeon RX 9070 XT | Linux | Mesa 26.2.5 | 2026-11-14 | works (detection and test encode) |
+| NVIDIA NVENC | AV1 encode | – | Windows | – | – | untested, reports welcome |
+| NVIDIA NVENC | AV1 encode | – | Linux | – | – | untested, reports welcome |
+| VA-API | VP9 encode | – | Linux | – | – | untested, reports welcome |
+| VA-API (Intel) | AV1, VP9 encode | – | Linux | – | – | untested, reports welcome |
+| AMD AMF | AV1 encode | – | Windows | – | – | untested, reports welcome |
+| Intel Quick Sync | AV1, VP9 encode | – | Windows | – | – | untested, reports welcome |
+
+### Reporting hardware results
+
+Run the detection example (`cargo run --example detect`) and open an issue with its output, your operating system, GPU and driver version, and whether encoding worked:
+
+The output lists each encoder with its status, device and driver version. If an encoder is reported as working but produces a wrong picture, or reported as unavailable although it should work, say so. Both are useful.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Licence
+
+Licensed under either of [Apache License 2.0](LICENSE-APACHE) or [MIT licence](LICENSE-MIT), at your option.
+
+Contributions are accepted under `MIT OR Apache-2.0`, without additional terms.
+
+The bundled third-party sources and headers keep their own licences:
+
+| Component | Licence |
+| --- | --- |
+| libvpx | BSD-3-Clause |
+| SVT-AV1 | BSD-3-Clause-Clear and the AOM patent licence |
+| dav1d | BSD-2-Clause |
+| oneVPL (libvpl) | MIT |
+| Vendor headers (NVENC, AMF, oneVPL, VA-API) | MIT |
+
+The licence texts are in `vendor/licenses/` and in the source packages.

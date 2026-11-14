@@ -1,0 +1,13 @@
+[package]
+name = "hwcodec-libvpl-src"
+description = "Source code of the Intel VPL dispatcher (libvpl) 2.17.0, bundled for the hwcodec crate's build"
+version = "0.1.0+2.17.0"
+edition = "2024"
+rust-version = "1.90"
+license = "MIT"
+repository = "https://github.com/Mumcord/hwcodec"
+readme = "README.md"
+include = ["/Cargo.toml", "/README.md", "/src/**", "/upstream/**"]
+
+[lints.rust]
+missing_docs = "warn"

@@ -1,0 +1,13 @@
+[package]
+name = "hwcodec-svt-av1-src"
+description = "Source code of SVT-AV1 4.2.0, bundled for the hwcodec crate's build"
+version = "0.1.0+4.2.0"
+edition = "2024"
+rust-version = "1.90"
+license = "BSD-3-Clause-Clear AND BSD-2-Clause"
+repository = "https://github.com/Mumcord/hwcodec"
+readme = "README.md"
+include = ["/Cargo.toml", "/README.md", "/src/**", "/upstream/**"]
+
+[lints.rust]
+missing_docs = "warn"

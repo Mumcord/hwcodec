@@ -1,0 +1,12 @@
+# Checked with `cargo deny check licenses`. Only licences compatible with MIT OR Apache-2.0.
+[licenses]
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSD-3-Clause-Clear",
+    "ISC",
+    "Unicode-3.0",
+]
+confidence-threshold = 0.9

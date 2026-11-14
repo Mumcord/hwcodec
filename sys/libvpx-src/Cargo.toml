@@ -1,0 +1,13 @@
+[package]
+name = "hwcodec-libvpx-src"
+description = "Source code of libvpx 1.15.2, bundled for the hwcodec crate's build"
+version = "0.1.0+1.15.2"
+edition = "2024"
+rust-version = "1.90"
+license = "BSD-3-Clause"
+repository = "https://github.com/Mumcord/hwcodec"
+readme = "README.md"
+include = ["/Cargo.toml", "/README.md", "/src/**", "/upstream/**"]
+
+[lints.rust]
+missing_docs = "warn"

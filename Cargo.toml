@@ -1,0 +1,87 @@
+[package]
+name = "hwcodec"
+description = "Realtime AV1 and VP9 video encoding and decoding: hardware encoders (NVENC, Quick Sync, AMF, VA-API) and software codecs (SVT-AV1, libvpx, dav1d) behind one interface"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.90"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/Mumcord/hwcodec"
+keywords = ["av1", "vp9", "video", "encoder", "hardware"]
+categories = ["multimedia::video", "multimedia::encoding"]
+
+[workspace]
+members = ["sys/*"]
+
+[features]
+default = ["nvenc", "amf", "qsv", "vaapi", "svt-av1", "libvpx", "dav1d"]
+# Hardware encoders. They only exist on Windows and Linux (VA-API on Linux only); elsewhere the
+# features compile to nothing.
+nvenc = []
+amf = []
+qsv = ["dep:hwcodec-libvpl-src"]
+vaapi = []
+# Software codecs.
+svt-av1 = ["dep:hwcodec-svt-av1-src"]
+libvpx = ["dep:hwcodec-libvpx-src"]
+dav1d = ["dep:hwcodec-dav1d-src"]
+
+[dependencies]
+log = "0.4"
+thiserror = "2"
+
+# Loads the GPU driver libraries for the hardware encoders at runtime (none on macOS). 0.8, not
+# 0.9: bindgen's generated loaders (build.rs) are written against the 0.8 API.
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+libloading = "0.8"
+
+[build-dependencies]
+bindgen = "0.73"
+pkg-config = "0.3"
+# The bundled sources of the native libraries, one package per library because of the crates.io
+# size limit. build.rs compiles them unless a prebuilt or system library is selected.
+hwcodec-libvpx-src = { version = "0.1.0", path = "sys/libvpx-src", optional = true }
+hwcodec-svt-av1-src = { version = "0.1.0", path = "sys/svt-av1-src", optional = true }
+hwcodec-dav1d-src = { version = "0.1.0", path = "sys/dav1d-src", optional = true }
+hwcodec-libvpl-src = { version = "0.1.0", path = "sys/libvpl-src", optional = true }
+
+[[test]]
+name = "av1"
+required-features = ["svt-av1", "dav1d", "libvpx"]
+
+[[test]]
+name = "codec"
+required-features = ["libvpx"]
+
+[[test]]
+name = "temporal_channels"
+required-features = ["svt-av1", "dav1d", "libvpx"]
+
+[[test]]
+name = "vaapi"
+required-features = ["dav1d", "libvpx"]
+
+[[test]]
+name = "settings"
+required-features = ["svt-av1", "dav1d", "libvpx"]
+
+[[test]]
+name = "fallback"
+required-features = ["svt-av1", "dav1d", "libvpx"]
+
+[[example]]
+name = "encode_decode"
+required-features = ["svt-av1", "dav1d", "libvpx"]
+
+[[example]]
+name = "encode_speed"
+required-features = ["svt-av1", "libvpx"]
+
+[lints.rust]
+missing_docs = "warn"
+unsafe_op_in_unsafe_fn = "warn"
+
+[lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+undocumented_unsafe_blocks = "warn"
+unwrap_used = "warn"

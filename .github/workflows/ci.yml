@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+  RUSTDOCFLAGS: -D warnings
+
+jobs:
+  check:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Windows is not in the matrix yet: the bundled sources are not built there, and the
+        # download of prebuilt codec libraries that replaces the source build is still to come.
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          components: rustfmt, clippy
+
+      # The build compiles the bundled codec sources, which needs a C/C++ compiler, CMake, NASM,
+      # Meson and Ninja, and libclang for the bindings.
+      - name: Install build tools
+        shell: bash
+        run: |
+          case "$RUNNER_OS" in
+            Linux)
+              sudo apt-get update
+              sudo apt-get install -y --no-install-recommends \
+                nasm meson ninja-build cmake pkg-config clang libclang-dev libva-dev
+              ;;
+            macOS) brew install nasm meson ninja cmake ;;
+          esac
+
+      - name: Format
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Tests
+        run: cargo test
+
+      - name: Documentation
+        run: cargo doc --no-deps
+
+      - name: Examples
+        run: cargo build --examples
+
+      - name: Licence check
+        if: runner.os == 'Linux'
+        run: |
+          cargo install --locked cargo-deny
+          cargo deny check licenses
+
+      - name: Package dry run
+        if: runner.os == 'Linux'
+        # The whole workspace at once: the source packages are not on crates.io yet, so hwcodec
+        # can only be packaged together with them.
+        run: cargo package --workspace
