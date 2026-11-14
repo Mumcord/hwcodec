@@ -4,6 +4,8 @@ on:
   pull_request:
   push:
     branches: [main]
+  # The release workflow runs these checks as its test suite.
+  workflow_call:
 
 permissions:
   contents: read
@@ -12,6 +14,7 @@ env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -D warnings
   RUSTDOCFLAGS: -D warnings
+  CARGO_DENY_VERSION: 0.20.2
 
 jobs:
   check:
@@ -41,10 +44,38 @@ jobs:
             Linux)
               sudo apt-get update
               sudo apt-get install -y --no-install-recommends \
-                nasm meson ninja-build cmake pkg-config clang libclang-dev libva-dev
+                nasm meson ninja-build cmake pkg-config clang libclang-dev libva-dev ccache
+              echo "/usr/lib/ccache" >> "$GITHUB_PATH"
               ;;
-            macOS) brew install nasm meson ninja cmake ;;
+            macOS)
+              brew install nasm meson ninja cmake ccache
+              echo "$(brew --prefix ccache)/libexec" >> "$GITHUB_PATH"
+              ;;
           esac
+
+      # The steps below compile the bundled codec sources several times (Clippy, tests,
+      # documentation and the package check each build them again). ccache stands in front of
+      # the C and C++ compilers and hands back the object files of an earlier, identical compile,
+      # so only the first run after a change to the sources pays for them. The build itself is
+      # unchanged: every step still runs the complete bundled build.
+      - name: Configure the compiler cache
+        shell: bash
+        run: |
+          {
+            echo "CCACHE_DIR=$RUNNER_TEMP/ccache"
+            # Build directories differ per step; paths below the checkout are compared relative.
+            echo "CCACHE_BASEDIR=$GITHUB_WORKSPACE"
+            echo "CCACHE_NOHASHDIR=1"
+            echo "CCACHE_COMPILERCHECK=content"
+            echo "CCACHE_MAXSIZE=1G"
+          } >> "$GITHUB_ENV"
+
+      - name: Restore the compiler cache
+        id: ccache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/ccache
+          key: ccache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('sys/**', 'build.rs') }}
 
       - name: Format
         run: cargo fmt --all --check
@@ -61,14 +92,37 @@ jobs:
       - name: Examples
         run: cargo build --examples
 
+      - name: Restore cargo-deny
+        if: runner.os == 'Linux'
+        id: deny
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cargo/bin/cargo-deny
+          key: cargo-deny-${{ runner.os }}-${{ runner.arch }}-${{ env.CARGO_DENY_VERSION }}
+
+      - name: Install cargo-deny
+        if: runner.os == 'Linux' && steps.deny.outputs.cache-hit != 'true'
+        run: cargo install --locked cargo-deny --version "$CARGO_DENY_VERSION"
+
       - name: Licence check
         if: runner.os == 'Linux'
-        run: |
-          cargo install --locked cargo-deny
-          cargo deny check licenses
+        run: cargo deny check licenses
 
       - name: Package dry run
         if: runner.os == 'Linux'
         # The whole workspace at once: the source packages are not on crates.io yet, so hwcodec
         # can only be packaged together with them.
         run: cargo package --workspace
+
+      - name: Compiler cache statistics
+        if: always()
+        run: ccache --show-stats
+
+      # Only main saves: a cache saved by a pull request is not visible to other branches, and
+      # the key only changes with the bundled sources.
+      - name: Save the compiler cache
+        if: github.ref == 'refs/heads/main' && steps.ccache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/ccache
+          key: ${{ steps.ccache.outputs.cache-primary-key }}
