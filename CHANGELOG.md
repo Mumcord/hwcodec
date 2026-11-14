@@ -17,6 +17,7 @@ First release (0.1.0).
 - Build: bundled sources by default (Linux, macOS); prebuilt libraries through `LIBVPX_STATIC_DIR`, `SVTAV1_STATIC_DIR`, `DAV1D_STATIC_DIR` and `HWENC_SDK_DIR`; system libraries through `HWCODEC_USE_SYSTEM_LIBS=1`. On Windows (`x86_64-pc-windows-msvc`) the libraries are linked prebuilt: from crates.io they come inside the package `hwcodec-prebuilt-x86_64-pc-windows-msvc`, without any download; a git checkout downloads the same files from the release `native-libs-1` of this repository and checks them against a SHA-256 fixed in the crate (`HWCODEC_NO_DOWNLOAD=1` forbids that download).
 - Colour conversion from BGRA to I420 (`convert::bgra_to_i420`).
 - Cargo features `nvenc`, `amf`, `qsv`, `vaapi`, `svt-av1`, `libvpx`, `dav1d`, all on by default.
+- Reduced builds: every subset of the cargo features builds, including none. A build without features has no build dependencies (no bindgen, no pkg-config) and needs no libclang, C compiler or native library on any target, which is what a phone build starts from. `TEMPORAL_LAYERS`, `AV1_TEMPORAL_LAYERS`, `Av1Options`, `vp9_threads` and `av1_cpu_supported` exist in every build, independent of the features. Android and iOS are compile-checked without features, not tested.
 - Bundled vendor headers and codec sources; no FFmpeg.
 - Examples and tests, including mocked-driver tests.
 

@@ -1,5 +1,9 @@
 //! Links the native codec libraries and generates their bindings, one step per cargo feature.
 //!
+//! A build without any feature does nothing here: bindgen, pkg-config and the other build
+//! dependencies are optional and only come with the features that need them, so such a build
+//! needs neither libclang nor a C compiler nor any native library, whatever the target.
+//!
 //! Software codecs (`libvpx`, `svt-av1`, `dav1d`) and the oneVPL dispatcher of Quick Sync (`qsv`,
 //! Windows and Linux only). Each library comes from the first of these that applies:
 //!
@@ -113,13 +117,8 @@ fn main() {
     svt_av1();
     #[cfg(feature = "dav1d")]
     dav1d();
+    #[cfg(any(feature = "nvenc", feature = "amf", feature = "qsv", feature = "vaapi"))]
     hardware_encoders();
-}
-
-/// Whether the cargo feature `name` is switched on for this build.
-fn feature(name: &str) -> bool {
-    let variable = format!("CARGO_FEATURE_{}", name.to_uppercase().replace('-', "_"));
-    env::var_os(variable).is_some()
 }
 
 fn msvc() -> bool {
@@ -193,6 +192,7 @@ fn dav1d() {
 
 /// Generates the bindings of the enabled hardware encoders from the bundled vendor headers and
 /// links the oneVPL dispatcher for Quick Sync; see the module documentation.
+#[cfg(any(feature = "nvenc", feature = "amf", feature = "qsv", feature = "vaapi"))]
 fn hardware_encoders() {
     let os = env::var("CARGO_CFG_TARGET_OS").expect("cargo sets CARGO_CFG_TARGET_OS");
     if os != "windows" && os != "linux" {
@@ -202,7 +202,8 @@ fn hardware_encoders() {
         PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"));
     let include = [manifest_dir.join("vendor/include")];
 
-    if feature("nvenc") {
+    #[cfg(feature = "nvenc")]
+    {
         generate(
             &include,
             bindgen::Builder::default()
@@ -216,7 +217,8 @@ fn hardware_encoders() {
             "nvenc.rs",
         );
     }
-    if feature("amf") {
+    #[cfg(feature = "amf")]
+    {
         generate(
             &include,
             bindgen::Builder::default()
@@ -242,7 +244,8 @@ fn hardware_encoders() {
             "vpl.rs",
         );
     }
-    if feature("vaapi") && os == "linux" {
+    #[cfg(feature = "vaapi")]
+    if os == "linux" {
         // libva and libva-drm are loaded at runtime, each into its own loader struct.
         generate(
             &include,
@@ -372,6 +375,15 @@ fn link_static(lib: &Library, dir: &Path) -> Vec<PathBuf> {
     vec![include]
 }
 
+#[cfg(any(
+    feature = "libvpx",
+    feature = "svt-av1",
+    feature = "dav1d",
+    feature = "nvenc",
+    feature = "amf",
+    feature = "qsv",
+    feature = "vaapi"
+))]
 fn generate(include_paths: &[PathBuf], builder: bindgen::Builder, file: &str) {
     let mut builder = builder
         .prepend_enum_name(false)
@@ -764,7 +776,17 @@ fn downloaded_prebuilt(name: &str, env: &str, alternative: &str) -> PathBuf {
 
 /// Downloads [`prebuilt_url`] to `archive` and stops the build unless it is exactly the file
 /// with [`PREBUILT_SHA256`].
-#[cfg(all(target_os = "windows", target_arch = "x86_64", target_env = "msvc"))]
+#[cfg(all(
+    target_os = "windows",
+    target_arch = "x86_64",
+    target_env = "msvc",
+    any(
+        feature = "libvpx",
+        feature = "svt-av1",
+        feature = "dav1d",
+        feature = "qsv"
+    )
+))]
 fn download_prebuilt(archive: &Path, alternative: &str) {
     use sha2::{Digest, Sha256};
 
@@ -804,7 +826,17 @@ fn download_prebuilt(archive: &Path, alternative: &str) {
 }
 
 /// The download runs Windows' own tools, so it only works when the build runs on Windows.
-#[cfg(not(all(target_os = "windows", target_arch = "x86_64", target_env = "msvc")))]
+#[cfg(not(all(
+    target_os = "windows",
+    target_arch = "x86_64",
+    target_env = "msvc",
+    any(
+        feature = "libvpx",
+        feature = "svt-av1",
+        feature = "dav1d",
+        feature = "qsv"
+    )
+)))]
 fn download_prebuilt(_archive: &Path, alternative: &str) {
     panic!(
         "\n\nhwcodec: the prebuilt codec libraries for {PREBUILT_TARGET} can only be downloaded \

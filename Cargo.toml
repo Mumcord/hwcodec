@@ -16,14 +16,14 @@ members = ["sys/*"]
 default = ["nvenc", "amf", "qsv", "vaapi", "svt-av1", "libvpx", "dav1d"]
 # Hardware encoders. They only exist on Windows and Linux (VA-API on Linux only); elsewhere the
 # features compile to nothing.
-nvenc = []
-amf = []
-qsv = ["dep:hwcodec-libvpl-src", "dep:hwcodec-prebuilt-x86_64-pc-windows-msvc"]
-vaapi = []
+nvenc = ["dep:bindgen"]
+amf = ["dep:bindgen"]
+qsv = ["dep:bindgen", "dep:pkg-config", "dep:hwcodec-libvpl-src", "dep:hwcodec-prebuilt-x86_64-pc-windows-msvc", "dep:sha2"]
+vaapi = ["dep:bindgen"]
 # Software codecs.
-svt-av1 = ["dep:hwcodec-svt-av1-src", "dep:hwcodec-prebuilt-x86_64-pc-windows-msvc"]
-libvpx = ["dep:hwcodec-libvpx-src", "dep:hwcodec-prebuilt-x86_64-pc-windows-msvc"]
-dav1d = ["dep:hwcodec-dav1d-src", "dep:hwcodec-prebuilt-x86_64-pc-windows-msvc"]
+svt-av1 = ["dep:bindgen", "dep:pkg-config", "dep:hwcodec-svt-av1-src", "dep:hwcodec-prebuilt-x86_64-pc-windows-msvc", "dep:sha2"]
+libvpx = ["dep:bindgen", "dep:pkg-config", "dep:hwcodec-libvpx-src", "dep:hwcodec-prebuilt-x86_64-pc-windows-msvc", "dep:sha2"]
+dav1d = ["dep:bindgen", "dep:pkg-config", "dep:hwcodec-dav1d-src", "dep:hwcodec-prebuilt-x86_64-pc-windows-msvc", "dep:sha2"]
 
 [dependencies]
 log = "0.4"
@@ -34,9 +34,14 @@ thiserror = "2"
 [target.'cfg(not(target_os = "macos"))'.dependencies]
 libloading = "0.9"
 
+# Every build dependency is optional and belongs to the features that have native code: a build
+# without features has none, so its build script needs neither libclang nor pkg-config nor a C
+# compiler, on any target.
 [build-dependencies]
-bindgen = "0.73"
-pkg-config = "0.3"
+# Generates the bindings of the codec libraries and of the vendor headers (needs libclang).
+bindgen = { version = "0.73", optional = true }
+# Finds the system libraries when HWCODEC_USE_SYSTEM_LIBS=1 is set.
+pkg-config = { version = "0.3", optional = true }
 # The bundled sources of the native libraries, one package per library because of the crates.io
 # size limit. build.rs compiles them unless a prebuilt or system library is selected.
 hwcodec-libvpx-src = { version = "0.1.0", path = "sys/libvpx-src", optional = true }
@@ -50,7 +55,7 @@ hwcodec-libvpl-src = { version = "0.1.0", path = "sys/libvpl-src", optional = tr
 # package is empty, against the checksum pinned in build.rs.
 [target.'cfg(all(target_os = "windows", target_arch = "x86_64", target_env = "msvc"))'.build-dependencies]
 hwcodec-prebuilt-x86_64-pc-windows-msvc = { version = "0.1.0", path = "sys/prebuilt-x86_64-pc-windows-msvc", optional = true }
-sha2 = "0.10"
+sha2 = { version = "0.10", optional = true }
 
 [[test]]
 name = "av1"

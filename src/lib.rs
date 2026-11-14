@@ -16,7 +16,9 @@
 //! The crate stores nothing and prints nothing: results come back as values, diagnostics go to
 //! the [`log`] crate.
 //!
-//! Every feature is on by default; a codec whose feature is off is not part of the build.
+//! Every feature is on by default; a codec whose feature is off is not part of the build. The
+//! plain values [`TEMPORAL_LAYERS`], [`AV1_TEMPORAL_LAYERS`], [`Av1Options`], [`vp9_threads`]
+//! and [`av1_cpu_supported`] exist in every build, also without any feature.
 //!
 //! Dropping every frame of the top layer halves the frame rate, dropping the top two quarters
 //! it, and the remaining frames still decode. Each [`EncodedFrame`] carries its layer id so a
@@ -43,11 +45,12 @@ mod ffi;
 mod frame;
 mod hw;
 pub mod selftest;
+mod software;
 
 #[cfg(feature = "dav1d")]
 pub use av1_dav1d::Av1Decoder;
 #[cfg(feature = "svt-av1")]
-pub use av1_svt::{AV1_TEMPORAL_LAYERS, Av1Encoder, Av1Options, av1_cpu_supported};
+pub use av1_svt::Av1Encoder;
 pub use codec::{Codec, EncodedFrame, EncoderConfig, VideoDecoder, VideoEncoder};
 #[cfg(feature = "libvpx")]
 pub use decoder::Vp9Decoder;
@@ -55,12 +58,15 @@ pub use detect::{
     EncoderReport, EncoderStatus, UnavailableReason, detect_encoder, detect_encoders,
 };
 #[cfg(feature = "libvpx")]
-pub use encoder::{TEMPORAL_LAYERS, Vp9Encoder, threads as vp9_threads};
+pub use encoder::Vp9Encoder;
 pub use fallback::{EncoderKind, default_order, open_best_encoder, open_software_decoder};
 pub use frame::{I420Frame, MAX_DECODED_HEIGHT, MAX_DECODED_WIDTH};
 pub use hw::{HardwareEncoder, open_hardware_encoder};
 #[cfg(feature = "svt-av1")]
 pub use selftest::{DEFAULT_PASS_PERCENT, SelftestResult, measure_av1};
+pub use software::{
+    AV1_TEMPORAL_LAYERS, Av1Options, TEMPORAL_LAYERS, av1_cpu_supported, vp9_threads,
+};
 
 /// What can go wrong in this crate.
 #[derive(Debug, thiserror::Error)]

@@ -136,6 +136,22 @@ jobs:
       - name: Examples
         run: cargo build --examples
 
+      # Builds with fewer cargo features than the default, as the phone builds of an application
+      # use the crate: Clippy, tests and documentation for each reduced set. The sets link the
+      # codec libraries that the steps above built from the bundled sources.
+      - name: Reduced feature sets
+        if: runner.os == 'Linux'
+        run: .github/scripts/feature-sets.sh sets
+
+      # Android and iOS without any feature. Only the rustup targets are installed: no NDK and
+      # no Xcode, and the script hides libclang, pkg-config and the C compilers from the build,
+      # so this fails if a build without features ever needs native code. Compiled, never run.
+      - name: Phone targets without features
+        if: runner.os == 'Linux'
+        run: |
+          rustup target add aarch64-linux-android aarch64-apple-ios
+          .github/scripts/feature-sets.sh phones
+
       # What the README promises to a newcomer: a new, empty project outside this checkout that
       # only adds hwcodec builds the bundled codec sources by itself and encodes and decodes AV1
       # and VP9. No variable selects other libraries here. Windows has its own two jobs below.
