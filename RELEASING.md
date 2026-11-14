@@ -1,0 +1,61 @@
+# Releasing
+
+A release publishes five packages to crates.io and creates a GitHub release. The pipeline (`.github/workflows/release.yml`) does the work; the maintainer prepares the version and pushes a tag.
+
+## The packages
+
+| Package               | Folder            | Version example |
+| --------------------- | ----------------- | --------------- |
+| `hwcodec`             | repository root   | `0.1.0`         |
+| `hwcodec-libvpx-src`  | `sys/libvpx-src`  | `0.1.0+1.15.2`  |
+| `hwcodec-svt-av1-src` | `sys/svt-av1-src` | `0.1.0+4.2.0`   |
+| `hwcodec-dav1d-src`   | `sys/dav1d-src`   | `0.1.0+1.5.4`   |
+| `hwcodec-libvpl-src`  | `sys/libvpl-src`  | `0.1.0+2.17.0`  |
+
+All five always carry the same version. The four source packages add the version of the library they bundle after a plus sign; that part only changes when the bundled library is updated.
+
+## Steps for a release
+
+1. **Set the version** in all five `Cargo.toml` files (`version = "X.Y.Z"`, for the source packages `X.Y.Z+<library version>`), and in the root `Cargo.toml` the four requirements on the source packages (`hwcodec-…-src = { version = "X.Y.Z", … }`).
+2. **Update `CHANGELOG.md`:** rename `## [Unreleased]` to `## [X.Y.Z] - YYYY-MM-DD` and put a new, empty `## [Unreleased]` above it. The text of the `[X.Y.Z]` section becomes the notes of the GitHub release.
+3. **Commit** (`chore: release X.Y.Z`), push to `main` and wait for CI to be green.
+4. **Rehearse** (optional, recommended): Actions → Release → Run workflow, leave `dry_run` switched on. This checks and packages everything and publishes nothing.
+5. **Tag and push:** `git tag vX.Y.Z && git push origin vX.Y.Z`. The tag must sit on the release commit on `main`. Pushing the tag starts the real release.
+6. **Check the result:** the five packages on crates.io, the page on docs.rs, and the release on GitHub.
+
+Published versions can never be replaced or removed from crates.io (only "yanked", which hides them from new users). If something is wrong after publishing, fix it and release the next patch version.
+
+## What the pipeline does
+
+1. **Check:** the tag equals the version of all five packages, and `CHANGELOG.md` has a section for that version. Otherwise it stops before anything is published.
+2. **Tests:** the complete CI checks (formatting, Clippy, tests, documentation, examples, licence check, package check) on Linux and macOS.
+3. **Publish to crates.io** in dependency order: `hwcodec-libvpx-src`, `hwcodec-svt-av1-src`, `hwcodec-dav1d-src`, `hwcodec-libvpl-src`, then `hwcodec`. After each package it waits until crates.io offers it for download. A version that is already on crates.io is skipped, so a release that stopped half-way can simply be run again (Actions → the failed run → Re-run failed jobs).
+4. **GitHub release** for the tag, with the changelog section as notes.
+
+The log of the publish job says in its first lines whether the run is a **dry run** or a **real publish**. A real publish only happens from a version tag; a run started by hand from a branch refuses to publish even with `dry_run` switched off.
+
+## One-time setup (maintainer)
+
+### Before the first release: a crates.io token
+
+crates.io can only trust this repository for a package once the package exists. The very first publish therefore needs a personal token:
+
+1. Sign in on <https://crates.io> with the GitHub account that shall own the packages.
+2. Account Settings → API Tokens → New Token. Scopes: `publish-new` and `publish-update`. Give it a short expiry (for example 7 days).
+3. In this repository: Settings → Secrets and variables → Actions → New repository secret, name `CARGO_REGISTRY_TOKEN`, value: the token.
+
+### After the first release: Trusted Publishing
+
+With Trusted Publishing, crates.io accepts a publish because it comes from this repository's release workflow; no stored token is needed. Register it once per package, for all five:
+
+1. On crates.io open the package → Settings → Trusted Publishing → Add → GitHub.
+2. Fill in: repository owner `Mumcord`, repository name `hwcodec`, workflow filename `release.yml`, environment `release`.
+3. When all five are registered, delete the repository secret `CARGO_REGISTRY_TOKEN` and revoke the token on crates.io.
+
+From then on the pipeline asks crates.io for a token that is valid for 30 minutes on each release. As long as the secret `CARGO_REGISTRY_TOKEN` exists, the pipeline uses it instead.
+
+It is also worth adding a second owner to each package on crates.io (package → Settings → Owners), so that the packages do not depend on one account.
+
+### Claude review
+
+The workflow `.github/workflows/claude-review.yml` reviews pull requests. It needs the repository secret `CLAUDE_CODE_OAUTH_TOKEN` (created locally with `claude setup-token`). Without the secret the review is skipped with a warning; pull requests do not fail because of it.
