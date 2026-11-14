@@ -60,6 +60,19 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # The complete history, to see below whether the tagged commit is part of main.
+          fetch-depth: 0
+
+      # main is protected: everything on it went through a pull request and the required
+      # checks. A tag on any other commit would publish code that did not.
+      - name: A version tag must sit on main
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          if ! git merge-base --is-ancestor HEAD origin/main; then
+            echo "::error::Tag $GITHUB_REF_NAME points at commit $(git rev-parse HEAD), which is not part of main. A release is only made from a commit on main: delete the tag, merge the change into main through a pull request and tag the merged commit (see RELEASING.md)."
+            exit 1
+          fi
+          echo "Tag $GITHUB_REF_NAME points at $(git rev-parse HEAD), which is part of main."
 
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
 
