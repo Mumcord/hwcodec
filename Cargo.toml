@@ -29,9 +29,8 @@ dav1d = ["dep:hwcodec-dav1d-src"]
 log = "0.4"
 thiserror = "2"
 
-# Loads the GPU driver libraries for the hardware encoders at runtime (none on macOS). 0.9 builds
-# and passes CI on Linux and macOS; the loaders that bindgen generates in build.rs for Windows
-# are not yet covered by CI.
+# Loads the GPU driver libraries for the hardware encoders at runtime (none on macOS). The
+# loaders that bindgen generates in build.rs use it too.
 [target.'cfg(not(target_os = "macos"))'.dependencies]
 libloading = "0.9"
 
@@ -44,6 +43,11 @@ hwcodec-libvpx-src = { version = "0.1.0", path = "sys/libvpx-src", optional = tr
 hwcodec-svt-av1-src = { version = "0.1.0", path = "sys/svt-av1-src", optional = true }
 hwcodec-dav1d-src = { version = "0.1.0", path = "sys/dav1d-src", optional = true }
 hwcodec-libvpl-src = { version = "0.1.0", path = "sys/libvpl-src", optional = true }
+
+# Only for build scripts that run on Windows: checks the downloaded prebuilt codec libraries
+# against the checksum pinned in build.rs. Nothing is added to builds on other systems.
+[target.'cfg(windows)'.build-dependencies]
+sha2 = "0.10"
 
 [[test]]
 name = "av1"

@@ -90,7 +90,20 @@ By default the codec libraries are built from the sources bundled in the `hwcode
 - A C and C++ compiler, `make`, `perl`, `nasm` (x86 and x86-64 only), `cmake`, `meson`, `ninja` and libclang (for the bindings).
 - If a tool is missing, the build stops with a message that names it.
 
-**Windows:** the source build is not available yet. Today you must supply prebuilt libraries with the variables below. Downloading prebuilt libraries during the build is planned. Cross-compiling also needs the variables.
+Cross-compiling needs the variables for prebuilt libraries below.
+
+### Building on Windows
+
+On Windows the sources are not built. Instead the build **downloads the codec libraries prebuilt**, so none of the tools above are needed except libclang:
+
+- **What:** one archive (about 7 MB) with static libvpx, SVT-AV1, dav1d and the oneVPL dispatcher for `x86_64-pc-windows-msvc`, built from the same bundled sources by this repository's workflow "Windows codec libraries", with the licence texts.
+- **From where:** a release of this repository named `native-libs-<number>`, over HTTPS: `https://github.com/Mumcord/hwcodec/releases/download/native-libs-1/hwcodec-native-libs-1-x86_64-pc-windows-msvc.tar.gz`. It is fetched with `curl.exe` and unpacked with `tar.exe`, which are part of Windows 10 and later, into the build directory. Nothing is installed on the machine.
+- **Checksum:** the SHA-256 of the archive is fixed in the crate's `build.rs`. A download that does not match is discarded and the build stops.
+- **When:** only if at least one of the four variables below is unset, once per build directory. With all four set, nothing is downloaded.
+- **Opt-out:** set `HWCODEC_NO_DOWNLOAD=1` to forbid the download. The build then stops unless you supply the libraries with the variables below. A library whose variable is set is never taken from the download.
+- **Supported target:** `x86_64-pc-windows-msvc` only, built on Windows. For other Windows targets (ARM64, the GNU toolchain) and when cross-compiling there are no prebuilt libraries: the build stops with a message that names the variables below.
+
+To use your own libraries instead, run `.github/scripts/build-windows-libs.sh <directory>` in Git Bash (needs Visual Studio with the C++ workload, cmake, meson, ninja, nasm and MSYS2) and point the four variables at the folders it creates. The downloaded archive has the same folders.
 
 ### Prebuilt and system libraries
 
@@ -102,6 +115,8 @@ Use your own libraries instead of building the bundled sources. A prebuilt libra
 | `SVTAV1_STATIC_DIR` | SVT-AV1 | `include/svt-av1/`, `lib/libSvtAv1Enc.a` (MSVC: `lib/SvtAv1Enc.lib`) |
 | `DAV1D_STATIC_DIR` | dav1d | `include/dav1d/`, `lib/libdav1d.a` (MSVC: `lib/dav1d.lib`) |
 | `HWENC_SDK_DIR` | oneVPL dispatcher (Quick Sync) | `lib/libvpl.a` (MSVC: `lib/vpl.lib`) |
+
+On Windows the libraries must be built for the dynamic C runtime (`/MD`), like Rust's MSVC target.
 
 Set `HWCODEC_USE_SYSTEM_LIBS=1` to use the libraries installed on the system, found with `pkg-config`. Leave the variable unset to turn it off; do not set it to `0` or an empty value.
 

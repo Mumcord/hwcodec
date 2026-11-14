@@ -15,8 +15,13 @@
 //! 2. The system library found with pkg-config, when `HWCODEC_USE_SYSTEM_LIBS=1` is set.
 //! 3. Otherwise a static library built here from the sources bundled in the `hwcodec-*-src`
 //!    crates (`sys/`), with the pinned versions and without network access. This needs build
-//!    tools on the machine; a missing one stops the build with a message that names it. Windows
-//!    is not supported by this step yet and needs the variables of step 1.
+//!    tools on the machine; a missing one stops the build with a message that names it.
+//!
+//!    Windows is the exception to step 3: the sources are not built there. The build downloads
+//!    one archive with all four libraries, prebuilt from the same bundled sources for
+//!    `x86_64-pc-windows-msvc` ([`prebuilt_url`]), checks it against the SHA-256 pinned in
+//!    [`PREBUILT_SHA256`] and unpacks it into `OUT_DIR`. `HWCODEC_NO_DOWNLOAD=1` forbids the
+//!    download; then, and for every other Windows target, the variables of step 1 are needed.
 //!
 //! The bindings are generated from the headers of exactly the library that is linked, because
 //! the libvpx ABI versions are checked at runtime and SVT-AV1's configuration struct changes
@@ -526,11 +531,9 @@ fn macos_arch() -> &'static str {
 fn bundled(name: &str, env: &str, version: &str, recipe: impl FnOnce() -> Recipe) -> PathBuf {
     let host = env::var("HOST").expect("cargo sets HOST");
     let target = env::var("TARGET").expect("cargo sets TARGET");
-    assert!(
-        target_os() != "windows",
-        "hwcodec: building {name} from the bundled sources is not yet supported on Windows \
-         without {env}. Set {env} to a prefix with a prebuilt static library."
-    );
+    if target_os() == "windows" {
+        return prebuilt(name, env, version, &target);
+    }
     assert!(
         host == target,
         "hwcodec: the bundled sources of {name} cannot be cross-compiled ({host} to {target}). \
@@ -601,6 +604,179 @@ fn bundled(name: &str, env: &str, version: &str, recipe: impl FnOnce() -> Recipe
     }
     fs::write(&stamp, version).unwrap_or_else(|err| panic!("writing {}: {err}", stamp.display()));
     prefix
+}
+
+/// Forbids the download of the prebuilt libraries on Windows.
+const NO_DOWNLOAD: &str = "HWCODEC_NO_DOWNLOAD";
+
+/// The only target the prebuilt libraries exist for.
+const PREBUILT_TARGET: &str = "x86_64-pc-windows-msvc";
+
+/// The release of the hwcodec repository that holds the archive with the prebuilt libraries for
+/// [`PREBUILT_TARGET`]: one prefix per library, named like [`name_directory`] names it, built by
+/// `.github/scripts/build-windows-libs.sh` from the bundled sources. RELEASING.md describes how
+/// a new one is published.
+const PREBUILT_TAG: &str = "native-libs-1";
+
+/// The SHA-256 of the archive at [`prebuilt_url`]. Nothing else is ever unpacked or linked.
+///
+/// The tag and this checksum belong together and are only changed together, when a library
+/// under `sys/` or its Windows build changes (RELEASING.md, "Windows: the prebuilt codec
+/// libraries"). A `native-libs-*` release must never be changed or deleted: every published
+/// version of this crate downloads exactly the file pinned here. The download only happens on
+/// Windows, only for a library whose variable (`LIBVPX_STATIC_DIR`, ...) is unset, and never
+/// with `HWCODEC_NO_DOWNLOAD=1`.
+const PREBUILT_SHA256: &str = "adae2a3116c69d05631cc763533f9bbb50ad6ca8e9c75f23cd64e401a941f26d";
+
+/// Where the archive of [`PREBUILT_TAG`] is downloaded from.
+fn prebuilt_url() -> String {
+    format!(
+        "https://github.com/Mumcord/hwcodec/releases/download/{PREBUILT_TAG}/\
+         hwcodec-{PREBUILT_TAG}-{PREBUILT_TARGET}.tar.gz"
+    )
+}
+
+/// What to do instead of the download, for the messages below.
+fn prebuilt_alternative() -> String {
+    let url = prebuilt_url();
+    format!(
+        "Alternatively build the libraries yourself and set LIBVPX_STATIC_DIR, \
+         SVTAV1_STATIC_DIR, DAV1D_STATIC_DIR and HWENC_SDK_DIR to their prefixes (see the \
+         README, \"Windows\"), or download {url} by other means, unpack it and point \
+         the four variables at its folders libvpx_static, svtav1_static, dav1d_static and \
+         hwenc_sdk."
+    )
+}
+
+/// Windows: returns the prefix of `name` in the downloaded archive of prebuilt libraries,
+/// fetching and unpacking the archive first if this `OUT_DIR` does not hold it yet.
+fn prebuilt(name: &str, env: &str, version: &str, target: &str) -> PathBuf {
+    println!("cargo:rerun-if-env-changed={NO_DOWNLOAD}");
+    let alternative = prebuilt_alternative();
+    assert!(
+        target == PREBUILT_TARGET,
+        "\n\nhwcodec: there are no prebuilt libraries for {target}, only for {PREBUILT_TARGET}, \
+         and the bundled sources are not built on Windows. Set {env} (and the variables of the \
+         other libraries) to a prefix with a static build of {name} for {target}.\n\n"
+    );
+    assert!(
+        !env::var(NO_DOWNLOAD).is_ok_and(|value| !value.is_empty() && value != "0"),
+        "\n\nhwcodec: {name} is needed, {env} is not set and {NO_DOWNLOAD} forbids downloading \
+         the prebuilt libraries.\n{alternative}\n\n"
+    );
+
+    let out = PathBuf::from(env::var_os("OUT_DIR").expect("cargo sets OUT_DIR"));
+    let root = out.join("native-libs");
+    let stamp = root.join(".hwcodec-sha256");
+    if !fs::read_to_string(&stamp).is_ok_and(|unpacked| unpacked == PREBUILT_SHA256) {
+        // Start from nothing: a half-unpacked earlier archive must not leak into this one.
+        if root.exists() {
+            fs::remove_dir_all(&root)
+                .unwrap_or_else(|err| panic!("removing {}: {err}", root.display()));
+        }
+        fs::create_dir_all(&root)
+            .unwrap_or_else(|err| panic!("creating {}: {err}", root.display()));
+        let archive = out.join("native-libs.tar.gz");
+        download_prebuilt(&archive, &alternative);
+        // tar.exe is part of Windows 10 and later, like curl.exe.
+        run_system_tool("tar.exe", |tar| {
+            tar.arg("-xf").arg(&archive).arg("-C").arg(&root);
+        })
+        .unwrap_or_else(|err| {
+            panic!(
+                "\n\nhwcodec: unpacking {} failed: {err}\n{alternative}\n\n",
+                archive.display()
+            )
+        });
+        // Best effort: the archive is only a copy of what was just unpacked.
+        let _ = fs::remove_file(&archive);
+        fs::write(&stamp, PREBUILT_SHA256)
+            .unwrap_or_else(|err| panic!("writing {}: {err}", stamp.display()));
+    }
+
+    let prefix = root.join(name_directory(env));
+    let found = fs::read_to_string(prefix.join("VERSION")).unwrap_or_default();
+    assert!(
+        found.trim() == version,
+        "\n\nhwcodec: the prebuilt libraries hold {name} `{}`, but this version of the crate \
+         bundles {version}. That is a mistake in this hwcodec release; please report it.\n\
+         {alternative}\n\n",
+        found.trim()
+    );
+    prefix
+}
+
+/// Downloads [`prebuilt_url`] to `archive` and stops the build unless it is exactly the file
+/// with [`PREBUILT_SHA256`].
+#[cfg(windows)]
+fn download_prebuilt(archive: &Path, alternative: &str) {
+    use sha2::{Digest, Sha256};
+
+    let url = prebuilt_url();
+
+    // curl.exe is part of Windows 10 and later. HTTPS only, also after redirects (GitHub
+    // redirects release downloads to its file storage).
+    run_system_tool("curl.exe", |curl| {
+        curl.args(["--fail", "--location", "--silent", "--show-error"])
+            .args(["--proto", "=https", "--proto-redir", "=https"])
+            .args(["--retry", "3", "--connect-timeout", "30"])
+            .arg("--output")
+            .arg(archive)
+            .arg(&url);
+    })
+    .unwrap_or_else(|err| {
+        panic!(
+            "\n\nhwcodec: downloading the prebuilt codec libraries from {url} failed \
+             (is there a network connection?): {err}\n{alternative}\n\n"
+        )
+    });
+    let bytes =
+        fs::read(archive).unwrap_or_else(|err| panic!("reading {}: {err}", archive.display()));
+    let found: String = Sha256::digest(&bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    if found != PREBUILT_SHA256 {
+        // Never leave a file that failed the check where a later step could pick it up.
+        let _ = fs::remove_file(archive);
+        panic!(
+            "\n\nhwcodec: the download from {url} is not the expected file and was \
+             discarded.\n  expected SHA-256: {PREBUILT_SHA256}\n  found SHA-256:    {found}\n\
+             Try again; if it stays like this, please report it.\n{alternative}\n\n"
+        );
+    }
+}
+
+/// The download runs Windows' own tools, so it only works when the build runs on Windows.
+#[cfg(not(windows))]
+fn download_prebuilt(_archive: &Path, alternative: &str) {
+    panic!(
+        "\n\nhwcodec: the prebuilt codec libraries for {PREBUILT_TARGET} can only be downloaded \
+         when building on Windows, not when cross-compiling.\n{alternative}\n\n"
+    );
+}
+
+/// Runs a tool that ships with Windows, from the system directory so that no other program of
+/// the same name on `PATH` is picked up, and returns its error output if it fails.
+fn run_system_tool(program: &str, arguments: impl FnOnce(&mut Command)) -> Result<(), String> {
+    let system = PathBuf::from(env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into()))
+        .join("System32")
+        .join(program);
+    let mut command = Command::new(&system);
+    arguments(&mut command);
+    let output = command
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|err| format!("running {}: {err}", system.display()))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(format!(
+            "{program} ended with {}: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        ))
+    }
 }
 
 /// The directory name of a library's bundled build, from the name of its variable.
