@@ -82,7 +82,9 @@ jobs:
 
       # hwcodec's build script does not compile the bundled sources on Windows. This job builds
       # them with the script that also makes the downloadable archive, once per change to the
-      # sources, and hands them to the build through the variables for prebuilt libraries.
+      # sources, and hands them to the build through the variables for prebuilt libraries, so
+      # the checks always run against the sources of this commit. The job `windows-download`
+      # below covers the download instead.
       - name: Restore the Windows codec libraries
         if: runner.os == 'Windows'
         id: windows-libs
@@ -168,3 +170,37 @@ jobs:
         with:
           path: ${{ runner.temp }}/ccache
           key: ${{ steps.ccache.outputs.cache-primary-key }}
+
+  # What somebody who builds the crate on Windows gets: no variables set, so the build script
+  # downloads the prebuilt codec libraries pinned in build.rs, checks them and links them.
+  windows-download:
+    name: windows-latest (downloaded libraries)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+
+      - name: The pinned archive matches the bundled sources
+        shell: bash
+        run: .github/scripts/check-windows-prebuilt.sh
+
+      - name: Tests
+        run: cargo test
+
+      - name: Examples
+        run: cargo build --examples
+
+      - name: The download can be forbidden
+        shell: bash
+        env:
+          HWCODEC_NO_DOWNLOAD: 1
+        run: |
+          # A fresh build directory, so that nothing unpacked earlier is reused.
+          if cargo check --target-dir "$RUNNER_TEMP/no-download" 2> "$RUNNER_TEMP/no-download.log"; then
+            echo "::error::The build succeeded although HWCODEC_NO_DOWNLOAD forbids the download."
+            exit 1
+          fi
+          grep -q "HWCODEC_NO_DOWNLOAD forbids downloading" "$RUNNER_TEMP/no-download.log"
