@@ -1,0 +1,37 @@
+name: Feature request
+description: Suggest an idea or improvement for hwcodec.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        hwcodec covers realtime AV1 and VP9 encoding and decoding without FFmpeg.
+        Check "Limits" and "Planned" in the [README](https://github.com/Mumcord/hwcodec#readme) first – your idea may already be listed.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: Describe the situation, not only the solution.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Your idea
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Hardware encoders
+        - Software codecs
+        - Detection and self-test
+        - Build and packaging
+        - Interface
+        - Other
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives or workarounds you've considered

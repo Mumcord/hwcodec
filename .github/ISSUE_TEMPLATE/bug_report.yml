@@ -1,0 +1,56 @@
+name: Bug report
+description: Something in hwcodec doesn't work as expected, or a hardware test result.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! Hardware results are welcome too, also when everything works.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you see, and what did you expect instead?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Ideally a few lines of code, or the example you ran.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: hwcodec version
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Linux
+        - Windows
+        - macOS
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: gpu
+    attributes:
+      label: GPU and driver version
+      placeholder: "NVIDIA RTX 4070, driver 570.86"
+  - type: textarea
+    id: detect
+    attributes:
+      label: Output of the detection example
+      description: Run `cargo run --example detect` and paste the output.
+      render: text
+  - type: textarea
+    id: logs
+    attributes:
+      label: Build output, logs or screenshots
+      description: Remove anything private first.
