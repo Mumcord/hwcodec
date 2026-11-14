@@ -94,16 +94,22 @@ Cross-compiling needs the variables for prebuilt libraries below.
 
 ### Building on Windows
 
-On Windows the sources are not built. Instead the build **downloads the codec libraries prebuilt**, so none of the tools above are needed except libclang:
+On Windows the sources are not built. The build links the codec libraries **prebuilt**, so none of the tools above are needed except libclang. Which of the three cases applies:
 
-- **What:** one archive (about 7 MB) with static libvpx, SVT-AV1, dav1d and the oneVPL dispatcher for `x86_64-pc-windows-msvc`, built from the same bundled sources by this repository's workflow "Windows codec libraries", with the licence texts.
-- **From where:** a release of this repository named `native-libs-<number>`, over HTTPS: `https://github.com/Mumcord/hwcodec/releases/download/native-libs-1/hwcodec-native-libs-1-x86_64-pc-windows-msvc.tar.gz`. It is fetched with `curl.exe` and unpacked with `tar.exe`, which are part of Windows 10 and later, into the build directory. Nothing is installed on the machine.
-- **Checksum:** the SHA-256 of the archive is fixed in the crate's `build.rs`. A download that does not match is discarded and the build stops.
-- **When:** only if at least one of the four variables below is unset, once per build directory. With all four set, nothing is downloaded.
-- **Opt-out:** set `HWCODEC_NO_DOWNLOAD=1` to forbid the download. The build then stops unless you supply the libraries with the variables below. A library whose variable is set is never taken from the download.
+| You build | Where the libraries come from | Network |
+| --- | --- | --- |
+| with one of the variables below set | your own library, for each variable that is set | none |
+| hwcodec **from crates.io** (the normal case) | the package `hwcodec-prebuilt-x86_64-pc-windows-msvc`, which cargo fetches together with hwcodec | none beyond cargo itself |
+| hwcodec from a **git checkout** or as a path dependency | a download during the build, checked against a fixed SHA-256 | one HTTPS download |
+
+- **What the libraries are:** static libvpx, SVT-AV1, dav1d and the oneVPL dispatcher for `x86_64-pc-windows-msvc` (about 7 MB packed, 22 MB unpacked), built from the same bundled sources by this repository's workflow "Windows codec libraries", with the licence texts.
+- **Origin:** a release of this repository named `native-libs-<number>`, currently [`native-libs-1`](https://github.com/Mumcord/hwcodec/releases/tag/native-libs-1). It states the library versions, the commit and workflow run that built the archive, and its SHA-256. The same SHA-256 is fixed in the crate's `build.rs` (`PREBUILT_SHA256`).
+- **From crates.io:** the package `hwcodec-prebuilt-x86_64-pc-windows-msvc` contains that archive, unpacked. The release pipeline publishes it only after comparing its files byte for byte with the checksummed archive. cargo downloads the package only on 64-bit Windows with MSVC, never on Linux or macOS. To verify it yourself, download the archive from the release, check its SHA-256 and compare it with the package's `prebuilt/` folder.
+- **From a git checkout:** the binaries are not kept in git, so that package is empty. The build then downloads `https://github.com/Mumcord/hwcodec/releases/download/native-libs-1/hwcodec-native-libs-1-x86_64-pc-windows-msvc.tar.gz` over HTTPS with `curl.exe` and unpacks it with `tar.exe`, which are part of Windows 10 and later, into the build directory. A download that does not match the SHA-256 is discarded and the build stops. Nothing is installed on the machine.
+- **Opt-out:** set `HWCODEC_NO_DOWNLOAD=1` to forbid that download. A build from a git checkout then stops unless you supply the libraries with the variables below. It has no effect on a build from crates.io, which never downloads.
 - **Supported target:** `x86_64-pc-windows-msvc` only, built on Windows. For other Windows targets (ARM64, the GNU toolchain) and when cross-compiling there are no prebuilt libraries: the build stops with a message that names the variables below.
 
-To use your own libraries instead, run `.github/scripts/build-windows-libs.sh <directory>` in Git Bash (needs Visual Studio with the C++ workload, cmake, meson, ninja, nasm and MSYS2) and point the four variables at the folders it creates. The downloaded archive has the same folders.
+To use your own libraries instead, run `.github/scripts/build-windows-libs.sh <directory>` in Git Bash (needs Visual Studio with the C++ workload, cmake, meson, ninja, nasm and MSYS2) and point the four variables at the folders it creates. A library whose variable is set is never taken from the package or the download.
 
 ### Prebuilt and system libraries
 

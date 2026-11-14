@@ -14,7 +14,7 @@ First release (0.1.0).
 - Detection with reasons: `detect_encoders` reports for every encoder whether it works and, if not, why, together with device and driver version.
 - Self-test: `selftest::measure_av1` checks that an encoder delivers a usable stream; `DEFAULT_PASS_PERCENT` is the default threshold.
 - Fallback: `default_order`, `open_best_encoder` (custom order possible) and `open_software_decoder`.
-- Build: bundled sources by default (Linux, macOS); prebuilt libraries through `LIBVPX_STATIC_DIR`, `SVTAV1_STATIC_DIR`, `DAV1D_STATIC_DIR` and `HWENC_SDK_DIR`; system libraries through `HWCODEC_USE_SYSTEM_LIBS=1`. On Windows (`x86_64-pc-windows-msvc`) the build downloads the libraries prebuilt from a release of this repository and checks them against a SHA-256 fixed in the crate; `HWCODEC_NO_DOWNLOAD=1` forbids the download.
+- Build: bundled sources by default (Linux, macOS); prebuilt libraries through `LIBVPX_STATIC_DIR`, `SVTAV1_STATIC_DIR`, `DAV1D_STATIC_DIR` and `HWENC_SDK_DIR`; system libraries through `HWCODEC_USE_SYSTEM_LIBS=1`. On Windows (`x86_64-pc-windows-msvc`) the libraries are linked prebuilt: from crates.io they come inside the package `hwcodec-prebuilt-x86_64-pc-windows-msvc`, without any download; a git checkout downloads the same files from the release `native-libs-1` of this repository and checks them against a SHA-256 fixed in the crate (`HWCODEC_NO_DOWNLOAD=1` forbids that download).
 - Colour conversion from BGRA to I420 (`convert::bgra_to_i420`).
 - Cargo features `nvenc`, `amf`, `qsv`, `vaapi`, `svt-av1`, `libvpx`, `dav1d`, all on by default.
 - Bundled vendor headers and codec sources; no FFmpeg.

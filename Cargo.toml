@@ -18,12 +18,12 @@ default = ["nvenc", "amf", "qsv", "vaapi", "svt-av1", "libvpx", "dav1d"]
 # features compile to nothing.
 nvenc = []
 amf = []
-qsv = ["dep:hwcodec-libvpl-src"]
+qsv = ["dep:hwcodec-libvpl-src", "dep:hwcodec-prebuilt-x86_64-pc-windows-msvc"]
 vaapi = []
 # Software codecs.
-svt-av1 = ["dep:hwcodec-svt-av1-src"]
-libvpx = ["dep:hwcodec-libvpx-src"]
-dav1d = ["dep:hwcodec-dav1d-src"]
+svt-av1 = ["dep:hwcodec-svt-av1-src", "dep:hwcodec-prebuilt-x86_64-pc-windows-msvc"]
+libvpx = ["dep:hwcodec-libvpx-src", "dep:hwcodec-prebuilt-x86_64-pc-windows-msvc"]
+dav1d = ["dep:hwcodec-dav1d-src", "dep:hwcodec-prebuilt-x86_64-pc-windows-msvc"]
 
 [dependencies]
 log = "0.4"
@@ -44,9 +44,12 @@ hwcodec-svt-av1-src = { version = "0.1.0", path = "sys/svt-av1-src", optional = 
 hwcodec-dav1d-src = { version = "0.1.0", path = "sys/dav1d-src", optional = true }
 hwcodec-libvpl-src = { version = "0.1.0", path = "sys/libvpl-src", optional = true }
 
-# Only for build scripts that run on Windows: checks the downloaded prebuilt codec libraries
-# against the checksum pinned in build.rs. Nothing is added to builds on other systems.
-[target.'cfg(windows)'.build-dependencies]
+# Only for builds that run on 64-bit Windows with MSVC; nothing is added on other systems.
+# The first holds the codec libraries prebuilt, because the bundled sources are not built on
+# Windows. The second checks the download that replaces it in a git checkout, where that
+# package is empty, against the checksum pinned in build.rs.
+[target.'cfg(all(target_os = "windows", target_arch = "x86_64", target_env = "msvc"))'.build-dependencies]
+hwcodec-prebuilt-x86_64-pc-windows-msvc = { version = "0.1.0", path = "sys/prebuilt-x86_64-pc-windows-msvc", optional = true }
 sha2 = "0.10"
 
 [[test]]

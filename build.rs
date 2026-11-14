@@ -17,11 +17,17 @@
 //!    crates (`sys/`), with the pinned versions and without network access. This needs build
 //!    tools on the machine; a missing one stops the build with a message that names it.
 //!
-//!    Windows is the exception to step 3: the sources are not built there. The build downloads
-//!    one archive with all four libraries, prebuilt from the same bundled sources for
-//!    `x86_64-pc-windows-msvc` ([`prebuilt_url`]), checks it against the SHA-256 pinned in
-//!    [`PREBUILT_SHA256`] and unpacks it into `OUT_DIR`. `HWCODEC_NO_DOWNLOAD=1` forbids the
-//!    download; then, and for every other Windows target, the variables of step 1 are needed.
+//!    Windows is the exception to step 3: the sources are not built there. For
+//!    `x86_64-pc-windows-msvc` all four libraries exist prebuilt from the same bundled sources:
+//!
+//!    - Taken from crates.io, the companion package `hwcodec-prebuilt-x86_64-pc-windows-msvc`
+//!      contains them and they are linked from there, without network access.
+//!    - In a git checkout that package is empty (the binaries are not kept in git). Then the
+//!      build downloads the same files as one archive ([`prebuilt_url`]), checks it against
+//!      the SHA-256 pinned in [`PREBUILT_SHA256`] and unpacks it into `OUT_DIR`.
+//!      `HWCODEC_NO_DOWNLOAD=1` forbids that download.
+//!
+//!    Every other Windows target needs the variables of step 1.
 //!
 //! The bindings are generated from the headers of exactly the library that is linked, because
 //! the libvpx ABI versions are checked at runtime and SVT-AV1's configuration struct changes
@@ -623,9 +629,12 @@ const PREBUILT_TAG: &str = "native-libs-1";
 /// The tag and this checksum belong together and are only changed together, when a library
 /// under `sys/` or its Windows build changes (RELEASING.md, "Windows: the prebuilt codec
 /// libraries"). A `native-libs-*` release must never be changed or deleted: every published
-/// version of this crate downloads exactly the file pinned here. The download only happens on
-/// Windows, only for a library whose variable (`LIBVPX_STATIC_DIR`, ...) is unset, and never
-/// with `HWCODEC_NO_DOWNLOAD=1`.
+/// version of this crate points at exactly the file pinned here. The files in the companion
+/// package `hwcodec-prebuilt-x86_64-pc-windows-msvc` on crates.io are the contents of this same
+/// archive (the release pipeline checks that byte for byte), so a build from crates.io links
+/// them without any download. The download only happens on Windows, only when that package
+/// holds no libraries (a git checkout or a path dependency), only for a library whose variable
+/// (`LIBVPX_STATIC_DIR`, ...) is unset, and never with `HWCODEC_NO_DOWNLOAD=1`.
 const PREBUILT_SHA256: &str = "adae2a3116c69d05631cc763533f9bbb50ad6ca8e9c75f23cd64e401a941f26d";
 
 /// Where the archive of [`PREBUILT_TAG`] is downloaded from.
@@ -648,10 +657,9 @@ fn prebuilt_alternative() -> String {
     )
 }
 
-/// Windows: returns the prefix of `name` in the downloaded archive of prebuilt libraries,
-/// fetching and unpacking the archive first if this `OUT_DIR` does not hold it yet.
+/// Windows: returns the prefix of `name` among the prebuilt libraries. They come with the
+/// companion package when that was taken from crates.io, and are downloaded otherwise.
 fn prebuilt(name: &str, env: &str, version: &str, target: &str) -> PathBuf {
-    println!("cargo:rerun-if-env-changed={NO_DOWNLOAD}");
     let alternative = prebuilt_alternative();
     assert!(
         target == PREBUILT_TARGET,
@@ -659,6 +667,64 @@ fn prebuilt(name: &str, env: &str, version: &str, target: &str) -> PathBuf {
          and the bundled sources are not built on Windows. Set {env} (and the variables of the \
          other libraries) to a prefix with a static build of {name} for {target}.\n\n"
     );
+    let root = packaged_prebuilt().unwrap_or_else(|| downloaded_prebuilt(name, env, &alternative));
+    let prefix = root.join(name_directory(env));
+    let found = fs::read_to_string(prefix.join("VERSION")).unwrap_or_default();
+    assert!(
+        found.trim() == version,
+        "\n\nhwcodec: the prebuilt libraries in {} hold {name} `{}`, but this version of the \
+         crate bundles {version}. That is a mistake in this hwcodec release; please report it.\n\
+         {alternative}\n\n",
+        root.display(),
+        found.trim()
+    );
+    prefix
+}
+
+/// The libraries inside the companion package `hwcodec-prebuilt-x86_64-pc-windows-msvc`. The
+/// package on crates.io contains them, so a build from crates.io needs no download. In a git
+/// checkout the package is empty, because the binaries are not kept in git.
+#[cfg(all(
+    target_os = "windows",
+    target_arch = "x86_64",
+    target_env = "msvc",
+    any(
+        feature = "libvpx",
+        feature = "svt-av1",
+        feature = "dav1d",
+        feature = "qsv"
+    )
+))]
+fn packaged_prebuilt() -> Option<PathBuf> {
+    let dir = hwcodec_prebuilt_x86_64_pc_windows_msvc::dir();
+    println!(
+        "cargo:rerun-if-changed={}",
+        hwcodec_prebuilt_x86_64_pc_windows_msvc::marker().display()
+    );
+    dir
+}
+
+/// The companion package is only a dependency of builds that run on 64-bit Windows with MSVC.
+#[cfg(not(all(
+    target_os = "windows",
+    target_arch = "x86_64",
+    target_env = "msvc",
+    any(
+        feature = "libvpx",
+        feature = "svt-av1",
+        feature = "dav1d",
+        feature = "qsv"
+    )
+)))]
+fn packaged_prebuilt() -> Option<PathBuf> {
+    None
+}
+
+/// Windows, without libraries in the companion package (a git checkout or a path dependency):
+/// returns the directory the downloaded archive of prebuilt libraries is unpacked in, fetching
+/// and unpacking the archive first if this `OUT_DIR` does not hold it yet.
+fn downloaded_prebuilt(name: &str, env: &str, alternative: &str) -> PathBuf {
+    println!("cargo:rerun-if-env-changed={NO_DOWNLOAD}");
     assert!(
         !env::var(NO_DOWNLOAD).is_ok_and(|value| !value.is_empty() && value != "0"),
         "\n\nhwcodec: {name} is needed, {env} is not set and {NO_DOWNLOAD} forbids downloading \
@@ -677,7 +743,7 @@ fn prebuilt(name: &str, env: &str, version: &str, target: &str) -> PathBuf {
         fs::create_dir_all(&root)
             .unwrap_or_else(|err| panic!("creating {}: {err}", root.display()));
         let archive = out.join("native-libs.tar.gz");
-        download_prebuilt(&archive, &alternative);
+        download_prebuilt(&archive, alternative);
         // tar.exe is part of Windows 10 and later, like curl.exe.
         run_system_tool("tar.exe", |tar| {
             tar.arg("-xf").arg(&archive).arg("-C").arg(&root);
@@ -693,22 +759,12 @@ fn prebuilt(name: &str, env: &str, version: &str, target: &str) -> PathBuf {
         fs::write(&stamp, PREBUILT_SHA256)
             .unwrap_or_else(|err| panic!("writing {}: {err}", stamp.display()));
     }
-
-    let prefix = root.join(name_directory(env));
-    let found = fs::read_to_string(prefix.join("VERSION")).unwrap_or_default();
-    assert!(
-        found.trim() == version,
-        "\n\nhwcodec: the prebuilt libraries hold {name} `{}`, but this version of the crate \
-         bundles {version}. That is a mistake in this hwcodec release; please report it.\n\
-         {alternative}\n\n",
-        found.trim()
-    );
-    prefix
+    root
 }
 
 /// Downloads [`prebuilt_url`] to `archive` and stops the build unless it is exactly the file
 /// with [`PREBUILT_SHA256`].
-#[cfg(windows)]
+#[cfg(all(target_os = "windows", target_arch = "x86_64", target_env = "msvc"))]
 fn download_prebuilt(archive: &Path, alternative: &str) {
     use sha2::{Digest, Sha256};
 
@@ -748,11 +804,11 @@ fn download_prebuilt(archive: &Path, alternative: &str) {
 }
 
 /// The download runs Windows' own tools, so it only works when the build runs on Windows.
-#[cfg(not(windows))]
+#[cfg(not(all(target_os = "windows", target_arch = "x86_64", target_env = "msvc")))]
 fn download_prebuilt(_archive: &Path, alternative: &str) {
     panic!(
         "\n\nhwcodec: the prebuilt codec libraries for {PREBUILT_TARGET} can only be downloaded \
-         when building on Windows, not when cross-compiling.\n{alternative}\n\n"
+         when building on 64-bit Windows with MSVC, not when cross-compiling.\n{alternative}\n\n"
     );
 }
 
