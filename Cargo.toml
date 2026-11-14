@@ -6,8 +6,24 @@ edition = "2024"
 rust-version = "1.90"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/Mumcord/hwcodec"
+documentation = "https://docs.rs/hwcodec"
+readme = "README.md"
 keywords = ["av1", "vp9", "video", "encoder", "hardware"]
 categories = ["multimedia::video", "multimedia::encoding"]
+# Only what a build of the crate, its tests and its examples needs.
+include = [
+    "/Cargo.toml",
+    "/README.md",
+    "/CHANGELOG.md",
+    "/LICENSE-APACHE",
+    "/LICENSE-MIT",
+    "/build.rs",
+    "/wrapper.h",
+    "/src/**",
+    "/examples/**",
+    "/tests/**",
+    "/vendor/**",
+]
 
 [workspace]
 members = ["sys/*"]

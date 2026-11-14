@@ -10,6 +10,8 @@ rust-version = "1.90"
 license = "BSD-3-Clause AND BSD-3-Clause-Clear AND BSD-2-Clause AND MIT"
 repository = "https://github.com/Mumcord/hwcodec"
 readme = "README.md"
+keywords = ["av1", "vp9", "video", "windows", "hwcodec"]
+categories = ["multimedia::video"]
 # `prebuilt/` is not in git: the release pipeline fills it from the checksummed archive before
 # packaging (.github/scripts/fetch-windows-prebuilt.sh).
 include = ["/Cargo.toml", "/README.md", "/src/**", "/prebuilt/**"]
