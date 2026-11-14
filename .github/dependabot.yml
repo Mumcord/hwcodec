@@ -15,6 +15,11 @@ updates:
         update-types:
           - "minor"
           - "patch"
+    ignore:
+      # Stays on 0.8: the loaders that bindgen generates in build.rs are written against the
+      # 0.8 interface (see Cargo.toml).
+      - dependency-name: "libloading"
+        update-types: ["version-update:semver-minor", "version-update:semver-major"]
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
