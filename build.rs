@@ -661,6 +661,12 @@ fn build_svt_av1(source: &Path) -> Recipe {
         .arg("-B")
         .arg(&build)
         .arg(format!("-DCMAKE_INSTALL_PREFIX={}", prefix.display()))
+        // SVT-AV1 writes its libraries to `Bin/` in its source directory by default; a build
+        // script must leave the sources untouched.
+        .arg(format!(
+            "-DCMAKE_OUTPUT_DIRECTORY={}",
+            build.join("bin").display()
+        ))
         .args(["-DCMAKE_BUILD_TYPE=Release", "-DBUILD_SHARED_LIBS=OFF"])
         .args([
             "-DBUILD_APPS=OFF",
