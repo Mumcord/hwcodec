@@ -136,6 +136,13 @@ jobs:
       - name: Examples
         run: cargo build --examples
 
+      # What the README promises to a newcomer: a new, empty project outside this checkout that
+      # only adds hwcodec builds the bundled codec sources by itself and encodes and decodes AV1
+      # and VP9. No variable selects other libraries here. Windows has its own two jobs below.
+      - name: Fresh project (bundled sources)
+        if: runner.os != 'Windows'
+        run: .github/scripts/fresh-project.sh bundled
+
       - name: Restore cargo-deny
         if: runner.os == 'Linux'
         id: deny
@@ -197,6 +204,12 @@ jobs:
       - name: Examples
         run: cargo build --examples
 
+      # A new, empty project outside this checkout that only adds hwcodec: it must link the
+      # libraries of the package and round-trip AV1 and VP9, with the download still forbidden.
+      - name: Fresh project (packaged libraries)
+        shell: bash
+        run: .github/scripts/fresh-project.sh packaged
+
   # What somebody who builds a git checkout on Windows gets: the companion package is empty
   # and no variables are set, so the build script downloads the prebuilt codec libraries pinned
   # in build.rs, checks them and links them.
@@ -215,6 +228,13 @@ jobs:
 
       - name: Examples
         run: cargo build --examples
+
+      # A new, empty project outside this checkout that only adds hwcodec: its own build
+      # downloads the pinned archive again, and the step fails unless the libraries it linked
+      # are the ones unpacked from that download.
+      - name: Fresh project (downloaded libraries)
+        shell: bash
+        run: .github/scripts/fresh-project.sh downloaded
 
       - name: The download can be forbidden
         shell: bash

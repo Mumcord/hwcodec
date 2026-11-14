@@ -21,7 +21,7 @@ All six always carry the same version. The four source packages add the version 
 2. **Update `CHANGELOG.md`:** rename `## [Unreleased]` to `## [X.Y.Z] - YYYY-MM-DD` and put a new, empty `## [Unreleased]` above it. The text of the `[X.Y.Z]` section becomes the notes of the GitHub release.
 3. **Commit** (`chore: release X.Y.Z`), push to `main` and wait for CI to be green.
 4. **Rehearse** (optional, recommended): Actions → Release → Run workflow, leave `dry_run` switched on. This checks and packages everything and publishes nothing.
-5. **Tag and push:** `git tag vX.Y.Z && git push origin vX.Y.Z`. The tag must sit on the release commit on `main`. Pushing the tag starts the real release.
+5. **Tag and push:** `git tag vX.Y.Z && git push origin vX.Y.Z`. The tag must sit on the release commit on `main`; the release workflow refuses a tag whose commit is not part of `main`. Pushing the tag starts the real release.
 6. **Check the result:** the six packages on crates.io, the page on docs.rs, and the release on GitHub.
 
 Published versions can never be replaced or removed from crates.io (only "yanked", which hides them from new users). If something is wrong after publishing, fix it and release the next patch version.
