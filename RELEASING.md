@@ -51,7 +51,7 @@ A new archive is needed whenever a library under `sys/` is updated, or `.github/
 3. **Publish to crates.io** in dependency order: `hwcodec-libvpx-src`, `hwcodec-svt-av1-src`, `hwcodec-dav1d-src`, `hwcodec-libvpl-src`, `hwcodec-prebuilt-x86_64-pc-windows-msvc`, then `hwcodec`. The package with the prebuilt Windows libraries is filled from the pinned archive and compared with it first. After each package it waits until crates.io offers it for download. A version that is already on crates.io is skipped, so a release that stopped half-way can simply be run again (Actions → the failed run → Re-run failed jobs).
 4. **GitHub release** for the tag, with the changelog section as notes.
 
-The log of the publish job says in its first lines whether the run is a **dry run** or a **real publish**. A real publish only happens from a version tag; a run started by hand from a branch refuses to publish even with `dry_run` switched off.
+A **dry run** runs the job "Package (dry run)", which has no access to crates.io; a **real publish** runs the job "Publish to crates.io" in the `release` environment, which accepts version tags only. A real publish only happens from a version tag; a run started by hand from a branch refuses to publish even with `dry_run` switched off.
 
 ## One-time setup (maintainer)
 

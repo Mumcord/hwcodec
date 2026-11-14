@@ -29,6 +29,11 @@ env:
   # A pushed tag is always a real release; a run started by hand is one only if the box
   # "dry_run" was cleared.
   DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+  # Dependency order: the four source packages and the prebuilt Windows libraries first,
+  # hwcodec depends on them.
+  PACKAGES: >-
+    hwcodec-libvpx-src hwcodec-svt-av1-src hwcodec-dav1d-src hwcodec-libvpl-src
+    hwcodec-prebuilt-x86_64-pc-windows-msvc hwcodec
 
 jobs:
   check:
@@ -126,9 +131,70 @@ jobs:
       - name: Check the pinned archive
         run: .github/scripts/fetch-windows-prebuilt.sh "$RUNNER_TEMP/prebuilt-check"
 
+  # The rehearsal of a run started by hand: everything is packaged exactly as it would be
+  # uploaded, but nothing is published. It runs outside the "release" environment and without
+  # "id-token: write", so it cannot get a crates.io token, and it can be started from any branch.
+  rehearsal:
+    name: Package (dry run)
+    needs: [check, tests, windows-prebuilt]
+    if: github.event_name == 'workflow_dispatch' && inputs.dry_run
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - name: Say what this run does
+        run: |
+          echo "=================================================================="
+          echo " DRY RUN - nothing is published to crates.io, no release is made"
+          echo "=================================================================="
+          echo "::notice title=Dry run::The packages are only built and checked. Nothing is published."
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+
+      # Packaging builds each package from the packaged files, which compiles the
+      # bundled codec sources.
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            nasm meson ninja-build cmake pkg-config clang libclang-dev libva-dev
+
+      - name: See which versions are already on crates.io
+        id: plan
+        run: |
+          metadata=$(cargo metadata --no-deps --format-version 1)
+          todo=()
+          for name in $PACKAGES; do
+            version=$(jq -r --arg name "$name" '.packages[] | select(.name == $name) | .version' <<<"$metadata")
+            if .github/scripts/crates-io-has.sh "$name" "$version"; then
+              echo "::notice::$name $version is already on crates.io; it is skipped."
+            else
+              echo "$name $version is not on crates.io yet."
+              todo+=("$name")
+            fi
+          done
+          echo "todo=${todo[*]}" >> "$GITHUB_OUTPUT"
+
+      # The rehearsal: build every package exactly as it would be uploaded, the one with the
+      # prebuilt Windows libraries filled from the pinned archive and compared with it.
+      - name: Package (dry run)
+        env:
+          TODO: ${{ steps.plan.outputs.todo }}
+        run: |
+          .github/scripts/package-all.sh
+          echo "::notice title=Dry run finished::A real release would now publish: ${TODO:-nothing, every version is already on crates.io}."
+
+  # The real publish. Only this job and the GitHub release below run for a real release; the
+  # "release" environment accepts version tags only, so no other ref can reach it.
   publish:
     name: Publish to crates.io
     needs: [check, tests, windows-prebuilt]
+    if: github.event_name == 'push' || !inputs.dry_run
     runs-on: ubuntu-latest
     timeout-minutes: 45
     # crates.io Trusted Publishing is registered for this workflow file and this environment.
@@ -137,28 +203,16 @@ jobs:
       contents: read
       id-token: write # lets crates.io verify that this workflow is the one asking for a token
     env:
-      # Dependency order: the four source packages and the prebuilt Windows libraries first,
-      # hwcodec depends on them.
-      PACKAGES: >-
-        hwcodec-libvpx-src hwcodec-svt-av1-src hwcodec-dav1d-src hwcodec-libvpl-src
-        hwcodec-prebuilt-x86_64-pc-windows-msvc hwcodec
       # Only needed for the very first publish: Trusted Publishing works once a package exists
       # on crates.io. While this secret is set it is used; without it, Trusted Publishing is.
       HAVE_TOKEN_SECRET: ${{ secrets.CARGO_REGISTRY_TOKEN != '' }}
     steps:
       - name: Say what this run does
         run: |
-          if [[ "$DRY_RUN" == "true" ]]; then
-            echo "=================================================================="
-            echo " DRY RUN - nothing is published to crates.io, no release is made"
-            echo "=================================================================="
-            echo "::notice title=Dry run::The packages are only built and checked. Nothing is published."
-          else
-            echo "=================================================================="
-            echo " REAL PUBLISH - the packages go to crates.io and cannot be removed"
-            echo "=================================================================="
-            echo "::notice title=Real publish::Publishing $GITHUB_REF_NAME to crates.io."
-          fi
+          echo "=================================================================="
+          echo " REAL PUBLISH - the packages go to crates.io and cannot be removed"
+          echo "=================================================================="
+          echo "::notice title=Real publish::Publishing $GITHUB_REF_NAME to crates.io."
 
       - name: A real publish needs a version tag
         if: env.DRY_RUN != 'true' && !startsWith(github.ref, 'refs/tags/v')
@@ -195,16 +249,6 @@ jobs:
             fi
           done
           echo "todo=${todo[*]}" >> "$GITHUB_OUTPUT"
-
-      # The rehearsal: build every package exactly as it would be uploaded, the one with the
-      # prebuilt Windows libraries filled from the pinned archive and compared with it.
-      - name: Package (dry run)
-        if: env.DRY_RUN == 'true'
-        env:
-          TODO: ${{ steps.plan.outputs.todo }}
-        run: |
-          .github/scripts/package-all.sh
-          echo "::notice title=Dry run finished::A real release would now publish: ${TODO:-nothing, every version is already on crates.io}."
 
       - name: Get a short-lived crates.io token (Trusted Publishing)
         id: auth
