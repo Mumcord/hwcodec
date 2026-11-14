@@ -74,10 +74,24 @@ for codec in AV1 VP9; do
 done
 
 # What hwcodec's build script told cargo: one search path and one library per codec library.
-output=$(grep -l "rustc-link-lib=static=vpx" target/release/build/hwcodec-*/output) ||
+# cargo keeps that output next to the script's OUT_DIR; the file name and the directories
+# above it differ between cargo versions, so it is searched for instead of spelled out.
+show_layout() {
+  echo "Files of hwcodec's build script below target/release/build:"
+  find target/release/build -path '*hwcodec*' -type f -not -path '*/out/*' | sort
+}
+output=$(find target/release/build -path '*hwcodec*' -type f \( -name output -o -name stdout \) \
+  -not -path '*/out/*' -exec grep -l "^cargo:rustc-link-lib=static=vpx" {} +) || true
+if [[ -z $output ]]; then
+  show_layout
   fail "hwcodec's build script output was not found."
+fi
 [[ $(wc -l <<< "$output") -eq 1 ]] || fail "more than one build of hwcodec: $output"
 out_dir=$(dirname "$output")/out
+if [[ ! -d $out_dir ]]; then
+  show_layout
+  fail "no OUT_DIR next to $output."
+fi
 for library in vpx SvtAv1Enc dav1d; do
   grep -q "^cargo:rustc-link-lib=static=$library\$" "$output" || fail "$library was not linked statically."
 done
@@ -86,7 +100,7 @@ searches=$(sed -n 's/^cargo:rustc-link-search=native=//p' "$output" | tr '\\' '/
 
 case "$mode" in
   bundled)
-    expected="$(basename "$parent")/fresh/target/release/build/hwcodec-"
+    expected="$(basename "$parent")/fresh/$out_dir/"
     source="built from the bundled sources (sys/) in the project's own target directory"
     logs=$(find "$out_dir" -name hwcodec-build.log | wc -l)
     [[ $logs -ge 3 ]] || fail "only $logs build logs of bundled sources in $out_dir."
@@ -97,7 +111,7 @@ case "$mode" in
     [[ ! -e $out_dir/native-libs ]] || fail "the build unpacked a download into $out_dir/native-libs."
     ;;
   downloaded)
-    expected="/out/native-libs/"
+    expected="/fresh/$out_dir/native-libs/"
     pin=$(grep -A1 '^const PREBUILT_SHA256' "$root/build.rs" | grep -oE '[0-9a-f]{64}')
     tag=$(sed -n 's/^const PREBUILT_TAG: &str = "\(.*\)";$/\1/p' "$root/build.rs")
     # The build script writes this file after it downloaded, checked and unpacked the archive.
