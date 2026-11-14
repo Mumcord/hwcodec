@@ -1,0 +1,22 @@
+name: Windows build tools
+description: >-
+  Installs what .github/scripts/build-windows-libs.sh needs on a Windows runner besides Visual
+  Studio, cmake and MSYS2, which the runner has: meson, ninja and NASM.
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      # Adds NASM to PATH. The entry is the runner's temp directory and a fixed version, never
+      # input from a pull request.
+      run: |
+        pip install --disable-pip-version-check meson==1.12.1 ninja==1.13.2
+        # The official NASM build: cmake, meson and MSBuild run it as a native Windows program.
+        nasm=2.16.03
+        cd "$RUNNER_TEMP"
+        curl -fsSL --retry 5 --retry-delay 5 -o nasm.zip \
+          "https://www.nasm.us/pub/nasm/releasebuilds/$nasm/win64/nasm-$nasm-win64.zip"
+        echo "3ee4782247bcb874378d02f7eab4e294a84d3d15f3f6ee2de2f47a46aa7226e6  nasm.zip" \
+          | sha256sum --check --quiet
+        unzip -q nasm.zip
+        cygpath -w "$RUNNER_TEMP/nasm-$nasm" >> "$GITHUB_PATH"

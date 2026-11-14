@@ -1,0 +1,156 @@
+# Builds the prebuilt codec libraries for Windows: libvpx, SVT-AV1, dav1d and the oneVPL
+# dispatcher for x86_64-pc-windows-msvc, from the bundled sources under sys/, packed into one
+# archive with the licence texts. hwcodec's build downloads that archive on Windows instead of
+# building the sources (see README.md, "Windows").
+#
+# Started by hand (Actions -> Windows codec libraries -> Run workflow). Without a tag it only
+# builds: the archive and its SHA-256 are attached to the run. With a tag (native-libs-<n>) it
+# also creates the GitHub release that hosts the archive. The steps for the maintainer are in
+# RELEASING.md.
+name: Windows codec libraries
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release to create, e.g. native-libs-2. Empty: build only, publish nothing."
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-libs-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  TARGET: x86_64-pc-windows-msvc
+
+jobs:
+  build:
+    name: Build
+    runs-on: windows-latest
+    timeout-minutes: 60
+    outputs:
+      archive: ${{ steps.pack.outputs.archive }}
+    steps:
+      - name: Check the tag
+        if: inputs.tag != ''
+        shell: bash
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          if [[ ! "$TAG" =~ ^native-libs-[0-9]+$ ]]; then
+            echo "::error::The tag must look like native-libs-<number>, got '$TAG'."
+            exit 1
+          fi
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install build tools
+        uses: ./.github/actions/windows-build-tools
+
+      - name: Build the libraries
+        shell: bash
+        run: .github/scripts/build-windows-libs.sh "$RUNNER_TEMP/native-libs"
+
+      - name: Pack the archive
+        id: pack
+        shell: bash
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          archive="hwcodec-${TAG:-native-libs-untagged}-$TARGET.tar.gz"
+          cd "$RUNNER_TEMP"
+          # Fixed order and no owner or time stamps of this machine in the archive.
+          tar --sort=name --owner=0 --group=0 --numeric-owner --mtime='2000-01-01 00:00Z' \
+            -czf "$archive" -C native-libs .
+          sha256sum "$archive" > "$archive.sha256"
+          {
+            echo "### $archive"
+            echo
+            echo "Size: $(du -h "$archive" | cut -f1)"
+            echo
+            echo "SHA-256: \`$(cut -d' ' -f1 "$archive.sha256")\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "archive=$archive" >> "$GITHUB_OUTPUT"
+
+          # The description of the release that hosts the archive.
+          version() { cat "native-libs/$1/VERSION"; }
+          cat > release-notes.md <<EOF
+          Prebuilt codec libraries that the [hwcodec](https://github.com/$GITHUB_REPOSITORY) crate links on Windows.
+
+          **This is not a version of hwcodec.** Crate versions are the releases named \`vX.Y.Z\`.
+
+          ## Who needs this
+
+          Developers who build hwcodec on Windows (\`$TARGET\`). They do not have to do anything: hwcodec's build script downloads this archive by itself, checks it against the SHA-256 below (which is fixed in its \`build.rs\`) and links the libraries. Nobody needs it on Linux or macOS, where the libraries are built from the sources bundled in the crate. The README section "Building on Windows" has the details, including how to forbid the download and use your own libraries.
+
+          ## Contents
+
+          \`$archive\`: static libraries for \`$TARGET\`, built for the dynamic C runtime (\`/MD\`), with their headers.
+
+          | Folder | Library | Version | Licence |
+          | --- | --- | --- | --- |
+          | \`libvpx_static\` | libvpx | $(version libvpx_static) | BSD-3-Clause, with the patent grant in \`PATENTS\` |
+          | \`svtav1_static\` | SVT-AV1 (encoder) | $(version svtav1_static) | BSD-3-Clause-Clear and BSD-2-Clause, with the Alliance for Open Media patent licence in \`PATENTS.md\` |
+          | \`dav1d_static\` | dav1d | $(version dav1d_static) | BSD-2-Clause |
+          | \`hwenc_sdk\` | oneVPL dispatcher (libvpl) | $(version hwenc_sdk) | MIT |
+
+          The full licence texts are in the archive under \`LICENSES/\`.
+
+          ## How it was built
+
+          By the workflow "Windows codec libraries" (\`.github/workflows/native-libs.yml\`, script \`.github/scripts/build-windows-libs.sh\`) of this repository at commit $GITHUB_SHA, from the unmodified sources bundled under \`sys/\`, on a GitHub-hosted Windows runner with Visual Studio (MSVC, x64). Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
+
+          ## Checksum
+
+          SHA-256 of \`$archive\`:
+
+          \`\`\`
+          $(cut -d' ' -f1 "$archive.sha256")
+          \`\`\`
+
+          This release must never be changed or deleted: published versions of hwcodec download exactly this file.
+          EOF
+          cat release-notes.md >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: native-libs
+          path: |
+            ${{ runner.temp }}/${{ steps.pack.outputs.archive }}
+            ${{ runner.temp }}/${{ steps.pack.outputs.archive }}.sha256
+            ${{ runner.temp }}/release-notes.md
+          if-no-files-found: error
+
+  release:
+    name: GitHub release
+    needs: build
+    if: inputs.tag != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write # creates the release
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: native-libs
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ inputs.tag }}
+          ARCHIVE: ${{ needs.build.outputs.archive }}
+        run: |
+          sha256sum --check "$ARCHIVE.sha256"
+          # Never the "latest" release: that label belongs to the crate versions. An existing
+          # tag makes this fail, so a published archive is never replaced.
+          gh release create "$TAG" "$ARCHIVE" "$ARCHIVE.sha256" \
+            --target "$GITHUB_SHA" --latest=false \
+            --title "Prebuilt codec libraries for Windows (${TAG#native-libs-})" \
+            --notes-file release-notes.md
