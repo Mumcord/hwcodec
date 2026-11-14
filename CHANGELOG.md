@@ -4,7 +4,9 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ## [Unreleased]
 
-First release (0.1.0).
+## [0.1.0] - 2026-11-14
+
+First public release.
 
 ### Added
 
@@ -21,6 +23,14 @@ First release (0.1.0).
 - Reduced builds: every subset of the cargo features builds, including none. A build without features has no build dependencies (no bindgen, no pkg-config) and needs no libclang, C compiler or native library on any target, which is what a phone build starts from. `TEMPORAL_LAYERS`, `AV1_TEMPORAL_LAYERS`, `Av1Options`, `vp9_threads` and `av1_cpu_supported` exist in every build, independent of the features. Android and iOS are compile-checked without features, not tested.
 - Bundled vendor headers and codec sources; no FFmpeg.
 - Examples and tests, including mocked-driver tests.
+
+### Known limits
+
+- Tuned for live video (low latency) only; a quality preset is planned for 0.2.
+- Decoding is software only; hardware decoding is planned for 0.2.
+- macOS has software encoding and decoding only. AMF and Quick Sync exist on Windows only; on Linux, AMD and Intel graphics cards are used through VA-API.
+- Tested on real hardware so far: VA-API AV1 encoding on an AMD Radeon RX 9070 XT (Linux, Mesa 26.2.5). Every other hardware path is untested; the README has the table and says how to report results.
+- The prebuilt Windows libraries exist for `x86_64-pc-windows-msvc` only. Other Windows targets and cross builds need the `*_STATIC_DIR` variables.
 
 ### Changed
 
