@@ -4,11 +4,7 @@ use std::ptr;
 
 use crate::codec::{Codec, VideoEncoder};
 use crate::ffi::{self, check};
-use crate::{EncodedFrame, EncoderConfig, Error, I420Frame, Result};
-
-/// Number of VP9 temporal layers (L1T3) unless the configuration asks for fewer; also the most
-/// the encoder produces. Layer ids run 0..TEMPORAL_LAYERS.
-pub const TEMPORAL_LAYERS: u8 = 3;
+use crate::{EncodedFrame, EncoderConfig, Error, I420Frame, Result, TEMPORAL_LAYERS, vp9_threads};
 
 /// Most threads libvpx runs an encoder with.
 const MAX_THREADS: u32 = 64;
@@ -101,7 +97,7 @@ impl Vp9Encoder {
                 num: 1,
                 den: TIMEBASE_DEN,
             };
-            cfg.g_threads = config.threads.unwrap_or_else(threads);
+            cfg.g_threads = config.threads.unwrap_or_else(vp9_threads);
             cfg.g_lag_in_frames = 0;
             // Without it, dropped upper-layer frames would still have updated the entropy context
             // the next base-layer frame decodes against.
@@ -422,17 +418,6 @@ fn set_layer_bitrates(cfg: &mut ffi::vpx_codec_enc_cfg_t, bitrate_kbps: u32, lay
     }
 }
 
-/// The libvpx thread count a software VP9 encoder is configured with unless the configuration
-/// names one.
-pub fn threads() -> u32 {
-    // More than four threads gains little at 720p (tile columns cap the parallelism) and takes
-    // cores from the game or app being shared.
-    std::thread::available_parallelism()
-        .map_or(1, |n| n.get().min(4))
-        .try_into()
-        .unwrap_or(1)
-}
-
 /// Describes `frame`'s packed planes as a libvpx image without copying.
 ///
 /// # Safety
@@ -484,7 +469,7 @@ mod tests {
     fn defaults_are_three_layers_and_automatic_threads() {
         let mut encoder = Vp9Encoder::new(config()).expect("encoder");
         assert_eq!(encoder.temporal_layers(), TEMPORAL_LAYERS);
-        assert_eq!(encoder.cfg.g_threads, threads());
+        assert_eq!(encoder.cfg.g_threads, vp9_threads());
         assert_eq!(encoder.config(), config());
         assert_eq!(layers_of(&mut encoder, 5), [0, 2, 1, 2, 0]);
     }
