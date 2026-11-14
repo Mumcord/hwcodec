@@ -163,3 +163,5 @@ The bundled third-party sources and headers keep their own licences:
 | Vendor headers (NVENC, AMF, oneVPL, VA-API) | MIT |
 
 The licence texts are in `vendor/licenses/` and in the source packages.
+
+<!-- review workflow check -->
