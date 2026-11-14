@@ -20,3 +20,5 @@ Thanks for helping. Hardware test reports are as valuable as code: see "Reportin
 ## Licence
 
 By submitting a contribution you agree that it is licensed under `MIT OR Apache-2.0`, the same as the crate, without additional terms. Third-party sources and headers under `vendor/` and in the bundled source packages keep their own licences.
+
+Releases are described in [RELEASING.md](RELEASING.md).
