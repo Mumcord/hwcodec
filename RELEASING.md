@@ -1,6 +1,6 @@
 # Releasing
 
-A release publishes five packages to crates.io and creates a GitHub release. The pipeline (`.github/workflows/release.yml`) does the work; the maintainer prepares the version and pushes a tag.
+A release publishes six packages to crates.io and creates a GitHub release. The pipeline (`.github/workflows/release.yml`) does the work; the maintainer prepares the version and pushes a tag.
 
 ## The packages
 
@@ -11,40 +11,44 @@ A release publishes five packages to crates.io and creates a GitHub release. The
 | `hwcodec-svt-av1-src` | `sys/svt-av1-src` | `0.1.0+4.2.0`   |
 | `hwcodec-dav1d-src`   | `sys/dav1d-src`   | `0.1.0+1.5.4`   |
 | `hwcodec-libvpl-src`  | `sys/libvpl-src`  | `0.1.0+2.17.0`  |
+| `hwcodec-prebuilt-x86_64-pc-windows-msvc` | `sys/prebuilt-x86_64-pc-windows-msvc` | `0.1.0+native-libs.1` |
 
-All five always carry the same version. The four source packages add the version of the library they bundle after a plus sign; that part only changes when the bundled library is updated.
+All six always carry the same version. The four source packages add the version of the library they bundle after a plus sign; that part only changes when the bundled library is updated. The package with the prebuilt Windows libraries adds the `native-libs` release its libraries come from (see "Windows: the prebuilt codec libraries").
 
 ## Steps for a release
 
-1. **Set the version** in all five `Cargo.toml` files (`version = "X.Y.Z"`, for the source packages `X.Y.Z+<library version>`), and in the root `Cargo.toml` the four requirements on the source packages (`hwcodec-…-src = { version = "X.Y.Z", … }`).
+1. **Set the version** in all six `Cargo.toml` files (`version = "X.Y.Z"`, for the source packages `X.Y.Z+<library version>`, for the prebuilt Windows libraries `X.Y.Z+native-libs.<number>`), and in the root `Cargo.toml` the five requirements on those packages (`hwcodec-… = { version = "X.Y.Z", … }`).
 2. **Update `CHANGELOG.md`:** rename `## [Unreleased]` to `## [X.Y.Z] - YYYY-MM-DD` and put a new, empty `## [Unreleased]` above it. The text of the `[X.Y.Z]` section becomes the notes of the GitHub release.
 3. **Commit** (`chore: release X.Y.Z`), push to `main` and wait for CI to be green.
 4. **Rehearse** (optional, recommended): Actions → Release → Run workflow, leave `dry_run` switched on. This checks and packages everything and publishes nothing.
 5. **Tag and push:** `git tag vX.Y.Z && git push origin vX.Y.Z`. The tag must sit on the release commit on `main`. Pushing the tag starts the real release.
-6. **Check the result:** the five packages on crates.io, the page on docs.rs, and the release on GitHub.
+6. **Check the result:** the six packages on crates.io, the page on docs.rs, and the release on GitHub.
 
 Published versions can never be replaced or removed from crates.io (only "yanked", which hides them from new users). If something is wrong after publishing, fix it and release the next patch version.
 
 ## Windows: the prebuilt codec libraries
 
-On Windows the crate's build does not compile the bundled sources. It downloads one archive with libvpx, SVT-AV1, dav1d and the oneVPL dispatcher, prebuilt for `x86_64-pc-windows-msvc`, and checks it against a SHA-256 that is fixed in `build.rs`.
+On Windows the crate's build does not compile the bundled sources. It links libvpx, SVT-AV1, dav1d and the oneVPL dispatcher prebuilt for `x86_64-pc-windows-msvc`.
 
-- **Where it lives:** in a GitHub release of this repository named `native-libs-<number>` (file `hwcodec-native-libs-<number>-x86_64-pc-windows-msvc.tar.gz`). These releases are separate from the crate versions (`vX.Y.Z`) and are never marked "latest". They must never be deleted or changed: every published crate version that pins one would stop building on Windows.
-- **What pins it:** `PREBUILT_TAG` and `PREBUILT_SHA256` in `build.rs`.
-- **When a new one is needed:** whenever a library under `sys/` is updated, or `.github/scripts/build-windows-libs.sh` changes how they are built. CI (job "windows-latest (downloaded libraries)") and the release pipeline fail while the pinned archive holds other library versions than `sys/`.
+- **Origin:** one archive in a GitHub release of this repository named `native-libs-<number>` (file `hwcodec-native-libs-<number>-x86_64-pc-windows-msvc.tar.gz`), built by the workflow "Windows codec libraries". These releases are separate from the crate versions (`vX.Y.Z`).
+- **The pin:** `PREBUILT_TAG` and `PREBUILT_SHA256` in `build.rs`.
+- **On crates.io:** the package `hwcodec-prebuilt-x86_64-pc-windows-msvc` contains the unpacked archive in `prebuilt/`. That folder is **not in git**. The pipeline fills it from the pinned archive (`.github/scripts/fetch-windows-prebuilt.sh`), packs it and publishes it only if the packed files are byte for byte the archive's (`.github/scripts/verify-prebuilt-package.sh`). Because cargo only packs files outside git with `--allow-dirty`, the pipeline uses that switch for this one package and checks itself that the checkout otherwise equals the tag.
+- **In a git checkout** the package is empty and the build downloads the pinned archive instead.
+- **Never delete or change a `native-libs-*` release.** Published crate versions point at them: a build from a git checkout of that version downloads exactly that file, and the release is the documented origin of the binaries inside the published package.
+- **The numbers move together:** the package version ends in the number of the release it holds. `PREBUILT_TAG = "native-libs-2"` goes with `version = "X.Y.Z+native-libs.2"` in `sys/prebuilt-x86_64-pc-windows-msvc/Cargo.toml`. The pipeline stops if they differ.
 
-Publishing a new archive:
+A new archive is needed whenever a library under `sys/` is updated, or `.github/scripts/build-windows-libs.sh` changes how the libraries are built. CI and the release pipeline fail while the pinned archive holds other library versions than `sys/`. Publishing a new archive:
 
 1. On the branch with the change: Actions → Windows codec libraries → Run workflow, choose the branch, leave `tag` empty. This only builds; check that it is green.
-2. Run it again with `tag` set to the next free number, e.g. `native-libs-2`. This creates the release with the archive and a `.sha256` file. The summary of the run shows the SHA-256.
-3. Put the new tag and SHA-256 into `PREBUILT_TAG` and `PREBUILT_SHA256` in `build.rs`, update the address in the README, and commit that on the same branch.
-4. CI on Windows must be green before the branch is merged.
+2. Run it again with `tag` set to the next free number, e.g. `native-libs-2`. This creates the release with the archive, a `.sha256` file and a description. The summary of the run shows the SHA-256.
+3. On the same branch, in one commit: put the new tag and SHA-256 into `PREBUILT_TAG` and `PREBUILT_SHA256` in `build.rs`, change the package version in `sys/prebuilt-x86_64-pc-windows-msvc/Cargo.toml` to `…+native-libs.<number>`, and update the release name and address in the README (section "Building on Windows") and in `sys/prebuilt-x86_64-pc-windows-msvc/README.md`.
+4. CI on Windows must be green before the branch is merged: it builds once with the package filled from the new archive and once with the download.
 
 ## What the pipeline does
 
-1. **Check:** the tag equals the version of all five packages, and `CHANGELOG.md` has a section for that version. Otherwise it stops before anything is published.
-2. **Tests:** the complete CI checks (formatting, Clippy, tests, documentation, examples, licence check, package check) on Linux, macOS and Windows, including a Windows build that downloads the prebuilt libraries. In parallel it checks that the prebuilt Windows libraries pinned in `build.rs` can be downloaded, have the pinned checksum and hold the library versions of this release.
-3. **Publish to crates.io** in dependency order: `hwcodec-libvpx-src`, `hwcodec-svt-av1-src`, `hwcodec-dav1d-src`, `hwcodec-libvpl-src`, then `hwcodec`. After each package it waits until crates.io offers it for download. A version that is already on crates.io is skipped, so a release that stopped half-way can simply be run again (Actions → the failed run → Re-run failed jobs).
+1. **Check:** the tag equals the version of all six packages, and `CHANGELOG.md` has a section for that version. Otherwise it stops before anything is published.
+2. **Tests:** the complete CI checks (formatting, Clippy, tests, documentation, examples, licence check, package check) on Linux, macOS and Windows, including one Windows build with the prebuilt libraries in the package and one that downloads them. In parallel it checks that the prebuilt Windows libraries pinned in `build.rs` can be downloaded, have the pinned checksum, hold the library versions of this release and match the package version.
+3. **Publish to crates.io** in dependency order: `hwcodec-libvpx-src`, `hwcodec-svt-av1-src`, `hwcodec-dav1d-src`, `hwcodec-libvpl-src`, `hwcodec-prebuilt-x86_64-pc-windows-msvc`, then `hwcodec`. The package with the prebuilt Windows libraries is filled from the pinned archive and compared with it first. After each package it waits until crates.io offers it for download. A version that is already on crates.io is skipped, so a release that stopped half-way can simply be run again (Actions → the failed run → Re-run failed jobs).
 4. **GitHub release** for the tag, with the changelog section as notes.
 
 The log of the publish job says in its first lines whether the run is a **dry run** or a **real publish**. A real publish only happens from a version tag; a run started by hand from a branch refuses to publish even with `dry_run` switched off.
@@ -57,11 +61,11 @@ crates.io can only trust this repository for a package once the package exists. 
 
 ### After the first release: Trusted Publishing
 
-With Trusted Publishing, crates.io accepts a publish because it comes from this repository's release workflow; no stored token is needed. Register it once per package, for all five:
+With Trusted Publishing, crates.io accepts a publish because it comes from this repository's release workflow; no stored token is needed. Register it once per package, for all six:
 
 1. On crates.io open the package → Settings → Trusted Publishing → Add → GitHub.
 2. Fill in: repository owner `Mumcord`, repository name `hwcodec`, workflow filename `release.yml`, environment `release`.
-3. When all five are registered, take this repository off the organisation secret `CARGO_REGISTRY_TOKEN` (organisation Settings → Secrets and variables → Actions → the secret → repository access), or delete the secret and revoke the token on crates.io if nothing else uses it.
+3. When all six are registered, take this repository off the organisation secret `CARGO_REGISTRY_TOKEN` (organisation Settings → Secrets and variables → Actions → the secret → repository access), or delete the secret and revoke the token on crates.io if nothing else uses it.
 
 From then on the pipeline asks crates.io for a token that is valid for 30 minutes on each release. As long as this repository can read the secret `CARGO_REGISTRY_TOKEN`, the pipeline uses it instead.
 

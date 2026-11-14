@@ -1,4 +1,4 @@
-# Releases hwcodec: publishes the five packages to crates.io and creates the GitHub release.
+# Releases hwcodec: publishes the six packages to crates.io and creates the GitHub release.
 #
 # Starts when a version tag (vX.Y.Z) is pushed. Started by hand (Actions -> Release -> Run
 # workflow) it is a rehearsal by default: everything is checked and packaged, but nothing is
@@ -58,8 +58,9 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
 
-      # All five packages carry the same version; the source packages add the version of the
-      # library they bundle after a plus sign (0.1.0+1.15.2), which is ignored here.
+      # All six packages carry the same version; the source packages add the version of the
+      # library they bundle after a plus sign (0.1.0+1.15.2) and the package with the prebuilt
+      # Windows libraries the release they come from (0.1.0+native-libs.1), which is ignored here.
       - name: Check the package versions
         id: version
         run: |
@@ -69,7 +70,7 @@ jobs:
           failed=false
           while read -r name package_version; do
             if [[ "${package_version%%+*}" != "$version" ]]; then
-              echo "::error::$name is at $package_version, but hwcodec is at $version. All five packages must carry the same version."
+              echo "::error::$name is at $package_version, but hwcodec is at $version. All six packages must carry the same version."
               failed=true
             fi
           done < <(jq -r '.packages[] | "\(.name) \(.version)"' <<<"$metadata")
@@ -106,12 +107,12 @@ jobs:
     needs: check
     uses: ./.github/workflows/ci.yml
 
-  # On Windows, hwcodec's build downloads the codec libraries prebuilt, from a release of this
+  # On Windows, hwcodec links prebuilt codec libraries. They come from a release of this
   # repository of its own (native-libs-<n>, made by the workflow "Windows codec libraries") that
-  # build.rs pins by tag and SHA-256. They are not attached to the crate's release: the checksum
-  # has to be inside the crate before it is published. This job only reads: it makes sure the
-  # pinned archive exists, has the pinned checksum and holds the library versions this release
-  # bundles, before anything is published.
+  # build.rs pins by tag and SHA-256, and the publish job below packs exactly that archive into
+  # the package hwcodec-prebuilt-x86_64-pc-windows-msvc. This job only reads: it makes sure,
+  # early, that the pinned archive exists, has the pinned checksum, holds the library versions
+  # this release bundles and is the one the package version names.
   windows-prebuilt:
     name: Windows prebuilt libraries
     needs: check
@@ -123,7 +124,7 @@ jobs:
           persist-credentials: false
 
       - name: Check the pinned archive
-        run: .github/scripts/check-windows-prebuilt.sh
+        run: .github/scripts/fetch-windows-prebuilt.sh "$RUNNER_TEMP/prebuilt-check"
 
   publish:
     name: Publish to crates.io
@@ -136,8 +137,11 @@ jobs:
       contents: read
       id-token: write # lets crates.io verify that this workflow is the one asking for a token
     env:
-      # Dependency order: the four source packages first, hwcodec depends on them.
-      PACKAGES: hwcodec-libvpx-src hwcodec-svt-av1-src hwcodec-dav1d-src hwcodec-libvpl-src hwcodec
+      # Dependency order: the four source packages and the prebuilt Windows libraries first,
+      # hwcodec depends on them.
+      PACKAGES: >-
+        hwcodec-libvpx-src hwcodec-svt-av1-src hwcodec-dav1d-src hwcodec-libvpl-src
+        hwcodec-prebuilt-x86_64-pc-windows-msvc hwcodec
       # Only needed for the very first publish: Trusted Publishing works once a package exists
       # on crates.io. While this secret is set it is used; without it, Trusted Publishing is.
       HAVE_TOKEN_SECRET: ${{ secrets.CARGO_REGISTRY_TOKEN != '' }}
@@ -192,15 +196,14 @@ jobs:
           done
           echo "todo=${todo[*]}" >> "$GITHUB_OUTPUT"
 
-      # The rehearsal: build every package exactly as it would be uploaded. The whole workspace
-      # at once, because hwcodec can only be packaged alone once the source packages are on
-      # crates.io.
+      # The rehearsal: build every package exactly as it would be uploaded, the one with the
+      # prebuilt Windows libraries filled from the pinned archive and compared with it.
       - name: Package (dry run)
         if: env.DRY_RUN == 'true'
         env:
           TODO: ${{ steps.plan.outputs.todo }}
         run: |
-          cargo package --workspace
+          .github/scripts/package-all.sh
           echo "::notice title=Dry run finished::A real release would now publish: ${TODO:-nothing, every version is already on crates.io}."
 
       - name: Get a short-lived crates.io token (Trusted Publishing)
@@ -222,7 +225,22 @@ jobs:
           for name in $TODO; do
             version=$(jq -r --arg name "$name" '.packages[] | select(.name == $name) | .version' <<<"$metadata")
             echo "::group::Publish $name $version"
-            cargo publish -p "$name"
+            if [[ "$name" == hwcodec-prebuilt-* ]]; then
+              # The libraries are not in git: fetch the pinned archive, pack, and only publish
+              # if the packed libraries are exactly the archive's. cargo packs files outside
+              # git only with --allow-dirty, so the checkout must otherwise equal the tag.
+              .github/scripts/fetch-windows-prebuilt.sh
+              if [[ -n $(git status --porcelain) ]]; then
+                echo "::error::The checkout differs from git; refusing to publish $name."
+                git status --short
+                exit 1
+              fi
+              cargo package -p "$name" --allow-dirty
+              .github/scripts/verify-prebuilt-package.sh "target/package/$name-$version.crate"
+              cargo publish -p "$name" --allow-dirty
+            else
+              cargo publish -p "$name"
+            fi
             echo "::endgroup::"
             # The next package can only be built once this one can be downloaded.
             for attempt in $(seq 1 60); do

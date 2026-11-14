@@ -1,7 +1,9 @@
 # Builds the prebuilt codec libraries for Windows: libvpx, SVT-AV1, dav1d and the oneVPL
 # dispatcher for x86_64-pc-windows-msvc, from the bundled sources under sys/, packed into one
-# archive with the licence texts. hwcodec's build downloads that archive on Windows instead of
-# building the sources (see README.md, "Windows").
+# archive with the licence texts. On Windows hwcodec links these instead of building the
+# sources: the release pipeline packs the archive into the crates.io package
+# hwcodec-prebuilt-x86_64-pc-windows-msvc, and a build from a git checkout downloads it (see
+# README.md, "Building on Windows").
 #
 # Started by hand (Actions -> Windows codec libraries -> Run workflow). Without a tag it only
 # builds: the archive and its SHA-256 are attached to the run. With a tag (native-libs-<n>) it
@@ -87,7 +89,12 @@ jobs:
 
           ## Who needs this
 
-          Developers who build hwcodec on Windows (\`$TARGET\`). They do not have to do anything: hwcodec's build script downloads this archive by itself, checks it against the SHA-256 below (which is fixed in its \`build.rs\`) and links the libraries. Nobody needs it on Linux or macOS, where the libraries are built from the sources bundled in the crate. The README section "Building on Windows" has the details, including how to forbid the download and use your own libraries.
+          Developers who build hwcodec on Windows (\`$TARGET\`), and they do not have to do anything with it by hand:
+
+          - hwcodec **from crates.io**: the package \`hwcodec-prebuilt-$TARGET\` contains exactly the files of this archive. The release pipeline publishes that package only after comparing it byte for byte with this archive. Nothing is downloaded during the build. This release is the origin of those files and the place to verify them.
+          - hwcodec **from a git checkout**: the binaries are not kept in git, so hwcodec's build script downloads this archive, checks it against the SHA-256 below (which is fixed in its \`build.rs\`) and links the libraries.
+
+          Nobody needs it on Linux or macOS, where the libraries are built from the sources bundled in the crate. The README section "Building on Windows" has the details, including how to forbid the download and use your own libraries.
 
           ## Contents
 
@@ -114,7 +121,9 @@ jobs:
           $(cut -d' ' -f1 "$archive.sha256")
           \`\`\`
 
-          This release must never be changed or deleted: published versions of hwcodec download exactly this file.
+          To verify the package from crates.io: download this archive, check its SHA-256, unpack it and compare it with the \`prebuilt/\` folder of \`hwcodec-prebuilt-$TARGET\`.
+
+          The files of this release must never be changed or deleted: published versions of hwcodec point at exactly this archive.
           EOF
           cat release-notes.md >> "$GITHUB_STEP_SUMMARY"
 

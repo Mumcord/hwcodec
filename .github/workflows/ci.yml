@@ -83,8 +83,8 @@ jobs:
       # hwcodec's build script does not compile the bundled sources on Windows. This job builds
       # them with the script that also makes the downloadable archive, once per change to the
       # sources, and hands them to the build through the variables for prebuilt libraries, so
-      # the checks always run against the sources of this commit. The job `windows-download`
-      # below covers the download instead.
+      # the checks always run against the sources of this commit. The jobs `windows-packaged`
+      # and `windows-download` below cover what users of the crate get instead.
       - name: Restore the Windows codec libraries
         if: runner.os == 'Windows'
         id: windows-libs
@@ -154,9 +154,9 @@ jobs:
 
       - name: Package dry run
         if: runner.os == 'Linux'
-        # The whole workspace at once: the source packages are not on crates.io yet, so hwcodec
-        # can only be packaged together with them.
-        run: cargo package --workspace
+        # All six packages as a release would upload them, including the one with the prebuilt
+        # Windows libraries, which is filled from the pinned archive and compared with it.
+        run: .github/scripts/package-all.sh
 
       - name: Compiler cache statistics
         if: always() && runner.os != 'Windows'
@@ -171,8 +171,35 @@ jobs:
           path: ${{ runner.temp }}/ccache
           key: ${{ steps.ccache.outputs.cache-primary-key }}
 
-  # What somebody who builds the crate on Windows gets: no variables set, so the build script
-  # downloads the prebuilt codec libraries pinned in build.rs, checks them and links them.
+  # What somebody who takes the crate from crates.io gets on Windows: the companion package
+  # holds the prebuilt codec libraries, and the build links them without any download. The
+  # package is filled here the way the release pipeline fills it before publishing.
+  windows-packaged:
+    name: windows-latest (packaged libraries)
+    runs-on: windows-latest
+    env:
+      # Proves that nothing is downloaded: with this set, a build that needed the download fails.
+      HWCODEC_NO_DOWNLOAD: 1
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+
+      - name: Fill the package with the pinned libraries
+        shell: bash
+        run: .github/scripts/fetch-windows-prebuilt.sh
+
+      - name: Tests
+        run: cargo test
+
+      - name: Examples
+        run: cargo build --examples
+
+  # What somebody who builds a git checkout on Windows gets: the companion package is empty
+  # and no variables are set, so the build script downloads the prebuilt codec libraries pinned
+  # in build.rs, checks them and links them.
   windows-download:
     name: windows-latest (downloaded libraries)
     runs-on: windows-latest
@@ -182,10 +209,6 @@ jobs:
           persist-credentials: false
 
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
-
-      - name: The pinned archive matches the bundled sources
-        shell: bash
-        run: .github/scripts/check-windows-prebuilt.sh
 
       - name: Tests
         run: cargo test
