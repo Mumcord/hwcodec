@@ -53,6 +53,8 @@ A new archive is needed whenever a library under `sys/` is updated, or `.github/
 
 A **dry run** runs the job "Package (dry run)", which has no access to crates.io; a **real publish** runs the job "Publish to crates.io" in the `release` environment, which accepts version tags only. A real publish only happens from a version tag; a run started by hand from a branch refuses to publish even with `dry_run` switched off.
 
+**crates.io's limit for new package names.** crates.io limits how fast one account may publish brand-new crates: a burst of 5 new crates at once, then 1 more every 10 minutes ([Publishing Rate Limits](https://crates.io/docs/rate-limits)). This only matters when a release introduces new package names, as 0.1.0 did with six; new versions of existing packages may be published 30 at once, then 1 per minute. If the job "Publish to crates.io" fails with `429 Too Many Requests: You have published too many new crates in a short period of time. Please try again after …`, wait until the time given in the message and re-run only the failed job (Actions → the failed run → Re-run failed jobs). The versions already published are skipped.
+
 ## One-time setup (maintainer)
 
 ### The first release: a crates.io token
