@@ -53,6 +53,8 @@ A new archive is needed whenever a library under `sys/` is updated, or `.github/
 
 A **dry run** runs the job "Package (dry run)", which has no access to crates.io; a **real publish** runs the job "Publish to crates.io" in the `release` environment, which accepts version tags only. A real publish only happens from a version tag; a run started by hand from a branch refuses to publish even with `dry_run` switched off.
 
+**crates.io's limit for new package names.** crates.io limits how fast one account may publish brand-new crates: a burst of 5 new crates at once, then 1 more every 10 minutes ([Publishing Rate Limits](https://crates.io/docs/rate-limits)). This only matters when a release introduces new package names, as 0.1.0 did with six; new versions of existing packages may be published 30 at once, then 1 per minute. If the job "Publish to crates.io" fails with `429 Too Many Requests: You have published too many new crates in a short period of time. Please try again after …`, wait until the time given in the message and re-run only the failed job (Actions → the failed run → Re-run failed jobs). The versions already published are skipped.
+
 ## One-time setup (maintainer)
 
 ### The first release: a crates.io token
@@ -61,13 +63,15 @@ crates.io can only trust this repository for a package once the package exists. 
 
 ### After the first release: Trusted Publishing
 
-With Trusted Publishing, crates.io accepts a publish because it comes from this repository's release workflow; no stored token is needed. Register it once per package, for all six:
+With Trusted Publishing, crates.io accepts a publish because it comes from this repository's release workflow; no stored token is needed. Register it once per package, for all six: `hwcodec-libvpx-src`, `hwcodec-svt-av1-src`, `hwcodec-dav1d-src`, `hwcodec-libvpl-src`, `hwcodec-prebuilt-x86_64-pc-windows-msvc` and `hwcodec`.
 
-1. On crates.io open the package → Settings → Trusted Publishing → Add → GitHub.
+1. On crates.io open the package → Settings → Trusted Publishing → Add, publisher GitHub.
 2. Fill in: repository owner `Mumcord`, repository name `hwcodec`, workflow filename `release.yml`, environment `release`.
 3. When all six are registered, take this repository off the organisation secret `CARGO_REGISTRY_TOKEN` (organisation Settings → Secrets and variables → Actions → the secret → repository access), or delete the secret and revoke the token on crates.io if nothing else uses it.
 
 From then on the pipeline asks crates.io for a token that is valid for 30 minutes on each release. As long as this repository can read the secret `CARGO_REGISTRY_TOKEN`, the pipeline uses it instead.
+
+Trusted Publishing only works for packages that already exist. A release that adds a new package name needs a crates.io token with the scope `publish-new` again (give this repository access to the secret for that release), and the new package is registered for Trusted Publishing afterwards.
 
 It is also worth adding a second owner to each package on crates.io (package → Settings → Owners), so that the packages do not depend on one account.
 
