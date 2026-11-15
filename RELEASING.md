@@ -63,13 +63,15 @@ crates.io can only trust this repository for a package once the package exists. 
 
 ### After the first release: Trusted Publishing
 
-With Trusted Publishing, crates.io accepts a publish because it comes from this repository's release workflow; no stored token is needed. Register it once per package, for all six:
+With Trusted Publishing, crates.io accepts a publish because it comes from this repository's release workflow; no stored token is needed. Register it once per package, for all six: `hwcodec-libvpx-src`, `hwcodec-svt-av1-src`, `hwcodec-dav1d-src`, `hwcodec-libvpl-src`, `hwcodec-prebuilt-x86_64-pc-windows-msvc` and `hwcodec`.
 
-1. On crates.io open the package → Settings → Trusted Publishing → Add → GitHub.
+1. On crates.io open the package → Settings → Trusted Publishing → Add, publisher GitHub.
 2. Fill in: repository owner `Mumcord`, repository name `hwcodec`, workflow filename `release.yml`, environment `release`.
 3. When all six are registered, take this repository off the organisation secret `CARGO_REGISTRY_TOKEN` (organisation Settings → Secrets and variables → Actions → the secret → repository access), or delete the secret and revoke the token on crates.io if nothing else uses it.
 
 From then on the pipeline asks crates.io for a token that is valid for 30 minutes on each release. As long as this repository can read the secret `CARGO_REGISTRY_TOKEN`, the pipeline uses it instead.
+
+Trusted Publishing only works for packages that already exist. A release that adds a new package name needs a crates.io token with the scope `publish-new` again (give this repository access to the secret for that release), and the new package is registered for Trusted Publishing afterwards.
 
 It is also worth adding a second owner to each package on crates.io (package → Settings → Owners), so that the packages do not depend on one account.
 
