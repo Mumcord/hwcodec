@@ -78,7 +78,7 @@ hwcodec-libvpl-src = { version = "0.1.0", path = "sys/libvpl-src", optional = tr
 # package is empty, against the checksum pinned in build.rs.
 [target.'cfg(all(target_os = "windows", target_arch = "x86_64", target_env = "msvc"))'.build-dependencies]
 hwcodec-prebuilt-x86_64-pc-windows-msvc = { version = "0.1.0", path = "sys/prebuilt-x86_64-pc-windows-msvc", optional = true }
-sha2 = { version = "0.10", optional = true }
+sha2 = { version = "0.11", optional = true }
 
 [[test]]
 name = "av1"
