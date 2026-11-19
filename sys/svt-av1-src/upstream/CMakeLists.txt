@@ -16,7 +16,7 @@ if("${CMAKE_CURRENT_SOURCE_DIR}" STREQUAL "${CMAKE_CURRENT_BINARY_DIR}")
                     "Please use the Build folder or create your own.")
 endif()
 
-project(svt-av1 VERSION 4.2.0
+project(svt-av1 VERSION 4.3.0
     LANGUAGES C CXX)
 
 set(VERSION_TAG "")
@@ -53,6 +53,29 @@ option(COMPILE_C_ONLY "Compile only C code with no simds (autodetect, default of
 option(MINIMAL_BUILD "Enable minimal build" OFF)
 if(MINIMAL_BUILD)
     add_definitions(-DMINIMAL_BUILD=1)
+    # Per-function/data sections so the linker can dead-strip unused code.
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -ffunction-sections -fdata-sections")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -ffunction-sections -fdata-sections")
+    # Drop unwind tables, stack canaries and fortify wrappers (offline encoder).
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fno-unwind-tables -fno-asynchronous-unwind-tables -fno-stack-protector")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-unwind-tables -fno-asynchronous-unwind-tables -fno-stack-protector")
+    # C++ TUs: no exceptions/RTTI in this C-dominant codebase. Skipped for unit
+    # tests, which use gtest and require exception support.
+    if(NOT BUILD_TESTING)
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-exceptions -fno-rtti")
+    endif()
+    # Use CMAKE_*_FLAGS (not add_definitions) so -U precedes -D on the command
+    # line; otherwise GCC warns "_FORTIFY_SOURCE redefined" vs its built-in.
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0")
+    if(APPLE)
+        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,-dead_strip -Wl,-no_compact_unwind")
+        if(NOT DEFINED ENV{NO_STRIP})
+            set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,-x")
+        endif()
+    else()
+        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,--gc-sections")
+    endif()
 endif()
 
 option(LOG_QUIET "Disable all logging from encoder" OFF)
@@ -60,9 +83,22 @@ if(LOG_QUIET)
     add_definitions(-DCONFIG_LOG_QUIET=1)
 endif()
 
+option(ENABLE_FAST_DECODE_3 "Build the experimental fast-decode 3 level (decode-speed settings for still images)" OFF)
+if(ENABLE_FAST_DECODE_3)
+    add_definitions(-DCONFIG_ENABLE_FAST_DECODE_3=1)
+endif()
+
 option(RTC_BUILD "Optimize build for RTC by disabling unused features and logging" OFF)
 if(RTC_BUILD)
     add_definitions(-DRTC_BUILD=1)
+endif()
+
+option(MOBILE_BUILD "Optimize build for mobile (8-bit RTC and VOD at M9+, AVIF at M6+) by disabling unused features and logging" OFF)
+if(MOBILE_BUILD)
+    if(RTC_BUILD)
+        message(FATAL_ERROR "RTC_BUILD and MOBILE_BUILD are mutually exclusive")
+    endif()
+    add_definitions(-DMOBILE_BUILD=1)
 endif()
 
 if(NOT COMPILE_C_ONLY AND HAVE_X86_PLATFORM)

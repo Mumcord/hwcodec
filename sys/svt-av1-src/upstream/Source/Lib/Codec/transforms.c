@@ -11,7 +11,9 @@
 */
 
 #include <stdlib.h>
+#include <string.h>
 #include "transforms.h"
+#include "common_utils.h"
 #include "aom_dsp_rtcd.h"
 
 const int8_t fwd_cos_bit_col[MAX_TXWH_IDX /*txw_idx*/][MAX_TXWH_IDX /*txh_idx*/] = {
@@ -45,629 +47,47 @@ const uint8_t tx_blocks_per_depth[BLOCK_SIZES_ALL][MAX_VARTX_DEPTH + 1] = {
 };
 
 // origin is block - separate tables for INTRA (idx 0) and INTER (idx 1) needed b/c of tx depth 2
-const Position tx_org[BLOCK_SIZES_ALL][2 /*is_inter*/][MAX_VARTX_DEPTH + 1][MAX_TXB_COUNT] = {
-    {// BLOCK_4X4
-     {// intra
-      {// tx_depth 0
-       {0, 0}},
-      {// tx_depth 1
-       {0, 0}},
-      {// tx_depth 2
-       {0, 0}}},
-     {// inter
-      {// tx_depth 0
-       {0, 0}},
-      {// tx_depth 1
-       {0, 0}},
-      {// tx_depth 2
-       {0, 0}}}},
-    {// BLOCK_4X8
-     {// intra
-      {// tx_depth 0
-       {0, 0}},
-      {// tx_depth 1
-       {0, 0}},
-      {// tx_depth 2
-       {0, 0}}},
-     {// inter
-      {// tx_depth 0
-       {0, 0}},
-      {// tx_depth 1
-       {0, 0}},
-      {// tx_depth 2
-       {0, 0}}}},
-    {// BLOCK_8X4
-     {// intra
-      {// tx_depth 0
-       {0, 0}},
-      {// tx_depth 1
-       {0, 0}},
-      {// tx_depth 2
-       {0, 0}}},
-     {// inter
-      {// tx_depth 0
-       {0, 0}},
-      {// tx_depth 1
-       {0, 0}},
-      {// tx_depth 2
-       {0, 0}}}},
-    {// BLOCK_8X8
-     {// intra
-      {// tx_depth 0
-       {0, 0}},
-      {// tx_depth 1
-       {0, 0},
-       {4, 0},
-       {0, 4},
-       {4, 4}},
-      {
-          // tx_depth 2
-          {0, 0} // not allowed
-      }},
-     {// inter
-      {// tx_depth 0
-       {0, 0}},
-      {// tx_depth 1
-       {0, 0},
-       {4, 0},
-       {0, 4},
-       {4, 4}},
-      {
-          // tx_depth 2
-          {0, 0} // not allowed
-      }}},
-    {// BLOCK_8X16
-     {// intra
-      {// tx_depth 0
-       {0, 0}},
-      {// tx_depth 1
-       {0, 0},
-       {0, 8}},
-      {// tx_depth 2
-       {0, 0},
-       {4, 0},
-       {0, 4},
-       {4, 4},
-       {0, 8},
-       {4, 8},
-       {0, 12},
-       {4, 12}}},
-     {// inter
-      {// tx_depth 0
-       {0, 0}},
-      {// tx_depth 1
-       {0, 0},
-       {0, 8}},
-      {// tx_depth 2
-       {0, 0},
-       {4, 0},
-       {0, 4},
-       {4, 4},
-       {0, 8},
-       {4, 8},
-       {0, 12},
-       {4, 12}}}},
-    {// BLOCK_16X8
-     {// intra
-      {// tx_depth 0
-       {0, 0}},
-      {// tx_depth 1
-       {0, 0},
-       {8, 0}},
-      {// tx_depth 2
-       {0, 0},
-       {4, 0},
-       {8, 0},
-       {12, 0},
-       {0, 4},
-       {4, 4},
-       {8, 4},
-       {12, 4}}},
-     {// inter
-      {// tx_depth 0
-       {0, 0}},
-      {// tx_depth 1
-       {0, 0},
-       {8, 0}},
-      {// tx_depth 2
-       {0, 0},
-       {4, 0},
-       {0, 4},
-       {4, 4},
-       {8, 0},
-       {12, 0},
-       {8, 4},
-       {12, 4}}}},
-    {// BLOCK_16X16
-     {// intra
-      {// tx_depth 0
-       {0, 0}},
-      {// tx_depth 1
-       {0, 0},
-       {8, 0},
-       {0, 8},
-       {8, 8}},
-      {// tx_depth 2
-       {0, 0},
-       {4, 0},
-       {8, 0},
-       {12, 0},
-       {0, 4},
-       {4, 4},
-       {8, 4},
-       {12, 4},
-       {0, 8},
-       {4, 8},
-       {8, 8},
-       {12, 8},
-       {0, 12},
-       {4, 12},
-       {8, 12},
-       {12, 12}}},
-     {// inter
-      {// tx_depth 0
-       {0, 0}},
-      {// tx_depth 1
-       {0, 0},
-       {8, 0},
-       {0, 8},
-       {8, 8}},
-      {// tx_depth 2
-       {0, 0},
-       {4, 0},
-       {0, 4},
-       {4, 4},
-       {8, 0},
-       {12, 0},
-       {8, 4},
-       {12, 4},
-       {0, 8},
-       {4, 8},
-       {0, 12},
-       {4, 12},
-       {8, 8},
-       {12, 8},
-       {8, 12},
-       {12, 12}}}},
-    {// BLOCK_16X32
-     {// intra
-      {// tx_depth 0
-       {0, 0}},
-      {// tx_depth 1
-       {0, 0},
-       {0, 16}},
-      {// tx_depth 2
-       {0, 0},
-       {8, 0},
-       {0, 8},
-       {8, 8},
-       {0, 16},
-       {8, 16},
-       {0, 24},
-       {8, 24}}},
-     {// inter
-      {// tx_depth 0
-       {0, 0}},
-      {// tx_depth 1
-       {0, 0},
-       {0, 16}},
-      {// tx_depth 2
-       {0, 0},
-       {8, 0},
-       {0, 8},
-       {8, 8},
-       {0, 16},
-       {8, 16},
-       {0, 24},
-       {8, 24}}}},
-    {// BLOCK_32X16
-     {// intra
-      {// tx_depth 0
-       {0, 0}},
-      {// tx_depth 1
-       {0, 0},
-       {16, 0}},
-      {// tx_depth 2
-       {0, 0},
-       {8, 0},
-       {16, 0},
-       {24, 0},
-       {0, 8},
-       {8, 8},
-       {16, 8},
-       {24, 8}}},
-     {// inter
-      {// tx_depth 0
-       {0, 0}},
-      {// tx_depth 1
-       {0, 0},
-       {16, 0}},
-      {// tx_depth 2
-       {0, 0},
-       {8, 0},
-       {0, 8},
-       {8, 8},
-       {16, 0},
-       {24, 0},
-       {16, 8},
-       {24, 8}}}},
-    {// BLOCK_32X32
-     {// intra
-      {// tx_depth 0
-       {0, 0}},
-      {// tx_depth 1
-       {0, 0},
-       {16, 0},
-       {0, 16},
-       {16, 16}},
-      {// tx_depth 2
-       {0, 0},
-       {8, 0},
-       {16, 0},
-       {24, 0},
-       {0, 8},
-       {8, 8},
-       {16, 8},
-       {24, 8},
-       {0, 16},
-       {8, 16},
-       {16, 16},
-       {24, 16},
-       {0, 24},
-       {8, 24},
-       {16, 24},
-       {24, 24}}},
-     {// inter
-      {// tx_depth 0
-       {0, 0}},
-      {// tx_depth 1
-       {0, 0},
-       {16, 0},
-       {0, 16},
-       {16, 16}},
-      {// tx_depth 2
-       {0, 0},
-       {8, 0},
-       {0, 8},
-       {8, 8},
-       {16, 0},
-       {24, 0},
-       {16, 8},
-       {24, 8},
-       {0, 16},
-       {8, 16},
-       {0, 24},
-       {8, 24},
-       {16, 16},
-       {24, 16},
-       {16, 24},
-       {24, 24}}}},
-    {// BLOCK_32X64
-     {// intra
-      {// tx_depth 0
-       {0, 0}},
-      {// tx_depth 1
-       {0, 0},
-       {0, 32}},
-      {// tx_depth 2
-       {0, 0},
-       {16, 0},
-       {0, 16},
-       {16, 16},
-       {0, 32},
-       {16, 32},
-       {0, 48},
-       {16, 48}}},
-     {// inter
-      {// tx_depth 0
-       {0, 0}},
-      {// tx_depth 1
-       {0, 0},
-       {0, 32}},
-      {// tx_depth 2
-       {0, 0},
-       {16, 0},
-       {0, 16},
-       {16, 16},
-       {0, 32},
-       {16, 32},
-       {0, 48},
-       {16, 48}}}},
-    {// BLOCK_64X32
-     {// intra
-      {// tx_depth 0
-       {0, 0}},
-      {// tx_depth 1
-       {0, 0},
-       {32, 0}},
-      {// tx_depth 2
-       {0, 0},
-       {16, 0},
-       {32, 0},
-       {48, 0},
-       {0, 16},
-       {16, 16},
-       {32, 16},
-       {48, 16}}},
-     {// inter
-      {// tx_depth 0
-       {0, 0}},
-      {// tx_depth 1
-       {0, 0},
-       {32, 0}},
-      {// tx_depth 2
-       {0, 0},
-       {16, 0},
-       {0, 16},
-       {16, 16},
-       {32, 0},
-       {48, 0},
-       {32, 16},
-       {48, 16}}}},
-    {// BLOCK_64X64
-     {// intra
-      {// tx_depth 0
-       {0, 0}},
-      {// tx_depth 1
-       {0, 0},
-       {32, 0},
-       {0, 32},
-       {32, 32}},
-      {// tx_depth 2
-       {0, 0},
-       {16, 0},
-       {32, 0},
-       {48, 0},
-       {0, 16},
-       {16, 16},
-       {32, 16},
-       {48, 16},
-       {0, 32},
-       {16, 32},
-       {32, 32},
-       {48, 32},
-       {0, 48},
-       {16, 48},
-       {32, 48},
-       {48, 48}}},
-     {// inter
-      {// tx_depth 0
-       {0, 0}},
-      {// tx_depth 1
-       {0, 0},
-       {32, 0},
-       {0, 32},
-       {32, 32}},
-      {// tx_depth 2
-       {0, 0},
-       {16, 0},
-       {0, 16},
-       {16, 16},
-       {32, 0},
-       {48, 0},
-       {32, 16},
-       {48, 16},
-       {0, 32},
-       {16, 32},
-       {0, 48},
-       {16, 48},
-       {32, 32},
-       {48, 32},
-       {32, 48},
-       {48, 48}}}},
-    {// BLOCK_64X128
-     {// intra
-      {// tx_depth 0
-       {0, 0},
-       {0, 64}},
-      {// tx_depth 1
-       {0, 0},
-       {0, 64}},
-      {// tx_depth 2
-       {0, 0},
-       {0, 64}}},
-     {// inter
-      {// tx_depth 0
-       {0, 0},
-       {0, 64}},
-      {// tx_depth 1
-       {0, 0},
-       {0, 64}},
-      {// tx_depth 2
-       {0, 0},
-       {0, 64}}}},
-    {// BLOCK_128X64
-     {// intra
-      {// tx_depth 0
-       {0, 0},
-       {64, 0}},
-      {// tx_depth 1
-       {0, 0},
-       {64, 0}},
-      {// tx_depth 2
-       {0, 0},
-       {64, 0}}},
-     {// inter
-      {// tx_depth 0
-       {0, 0},
-       {64, 0}},
-      {// tx_depth 1
-       {0, 0},
-       {64, 0}},
-      {// tx_depth 2
-       {0, 0},
-       {64, 0}}}},
-    {// BLOCK_128X128
-     {// intra
-      {// tx_depth 0
-       {0, 0},
-       {64, 0},
-       {0, 64},
-       {64, 64}},
-      {// tx_depth 1
-       {0, 0},
-       {64, 0},
-       {0, 64},
-       {64, 64}},
-      {// tx_depth 2
-       {0, 0},
-       {64, 0},
-       {0, 64},
-       {64, 64}}},
-     {// inter
-      {// tx_depth 0
-       {0, 0},
-       {64, 0},
-       {0, 64},
-       {64, 64}},
-      {// tx_depth 1
-       {0, 0},
-       {64, 0},
-       {0, 64},
-       {64, 64}},
-      {// tx_depth 2
-       {0, 0},
-       {64, 0},
-       {0, 64},
-       {64, 64}}}},
-    {// BLOCK_4X16
-     {// intra
-      {// tx_depth 0
-       {0, 0}},
-      {// tx_depth 1
-       {0, 0},
-       {0, 8}},
-      {// tx_depth 2
-       {0, 0},
-       {0, 4},
-       {0, 8},
-       {0, 12}}},
-     {// inter
-      {// tx_depth 0
-       {0, 0}},
-      {// tx_depth 1
-       {0, 0},
-       {0, 8}},
-      {// tx_depth 2
-       {0, 0},
-       {0, 4},
-       {0, 8},
-       {0, 12}}}},
-    {// BLOCK_16X4
-     {// intra
-      {// tx_depth 0
-       {0, 0}},
-      {// tx_depth 1
-       {0, 0},
-       {8, 0}},
-      {// tx_depth 2
-       {0, 0},
-       {4, 0},
-       {8, 0},
-       {12, 0}}},
-     {// inter
-      {// tx_depth 0
-       {0, 0}},
-      {// tx_depth 1
-       {0, 0},
-       {8, 0}},
-      {// tx_depth 2
-       {0, 0},
-       {4, 0},
-       {8, 0},
-       {12, 0}}}},
-    {// BLOCK_8X32
-     {// intra
-      {// tx_depth 0
-       {0, 0}},
-      {// tx_depth 1
-       {0, 0},
-       {0, 16}},
-      {// tx_depth 2
-       {0, 0},
-       {0, 8},
-       {0, 16},
-       {0, 24}}},
-     {// inter
-      {// tx_depth 0
-       {0, 0}},
-      {// tx_depth 1
-       {0, 0},
-       {0, 16}},
-      {// tx_depth 2
-       {0, 0},
-       {0, 8},
-       {0, 16},
-       {0, 24}}}},
-    {// BLOCK_32X8
-     {// intra
-      {// tx_depth 0
-       {0, 0}},
-      {// tx_depth 1
-       {0, 0},
-       {16, 0}},
-      {// tx_depth 2
-       {0, 0},
-       {8, 0},
-       {16, 0},
-       {24, 0}}},
-     {// inter
-      {// tx_depth 0
-       {0, 0}},
-      {// tx_depth 1
-       {0, 0},
-       {16, 0}},
-      {// tx_depth 2
-       {0, 0},
-       {8, 0},
-       {16, 0},
-       {24, 0}}}},
-    {// BLOCK_16X64
-     {// intra
-      {// tx_depth 0
-       {0, 0}},
-      {// tx_depth 1
-       {0, 0},
-       {0, 32}},
-      {// tx_depth 2
-       {0, 0},
-       {0, 16},
-       {0, 32},
-       {0, 48}}},
-     {// inter
-      {// tx_depth 0
-       {0, 0}},
-      {// tx_depth 1
-       {0, 0},
-       {0, 32}},
-      {// tx_depth 2
-       {0, 0},
-       {0, 16},
-       {0, 32},
-       {0, 48}}}},
-    {// BLOCK_64X16
-     {// intra
-      {// tx_depth 0
-       {0, 0}},
-      {// tx_depth 1
-       {0, 0},
-       {32, 0}},
-      {// tx_depth 2
-       {0, 0},
-       {16, 0},
-       {32, 0},
-       {48, 0}}},
-     {// inter
-      {// tx_depth 0
-       {0, 0}},
-      {// tx_depth 1
-       {0, 0},
-       {32, 0}},
-      {// tx_depth 2
-       {0, 0},
-       {16, 0},
-       {32, 0},
-       {48, 0}}}}};
+Position tx_org[BLOCK_SIZES_ALL][2 /*is_inter*/][MAX_VARTX_DEPTH + 1][MAX_TXB_COUNT]; // built at init
+
+// Build the per-(bsize, is_inter, tx_depth) transform-block origins from tx_depth_to_tx_size[]. INTRA lists
+// the txbs in raster order; INTER lists them in quad/Z order (raster within each depth-1 parent), which only
+// differs from raster at tx_depth 2 of 2D-split blocks. Replaces a ~17 KB const table.
+void svt_aom_build_tx_org(void) {
+    memset(tx_org, 0, sizeof(tx_org));
+    for (BlockSize bs = 0; bs < BLOCK_SIZES_ALL; bs++) {
+        const int bw = block_size_wide[bs], bh = block_size_high[bs];
+        for (int depth = 0; depth <= MAX_VARTX_DEPTH; depth++) {
+            const TxSize txs = tx_depth_to_tx_size[depth][bs];
+            const int    tw = tx_size_wide[txs], th = tx_size_high[txs];
+            int          k = 0;
+            for (int y = 0; y < bh; y += th) {
+                for (int x = 0; x < bw; x += tw) {
+                    tx_org[bs][0][depth][k++] = (Position){x, y};
+                }
+            }
+            k = 0;
+            if (depth == 0) {
+                for (int y = 0; y < bh; y += th) {
+                    for (int x = 0; x < bw; x += tw) {
+                        tx_org[bs][1][depth][k++] = (Position){x, y};
+                    }
+                }
+            } else {
+                const TxSize ptxs = tx_depth_to_tx_size[depth - 1][bs];
+                const int    ptw = tx_size_wide[ptxs], pth = tx_size_high[ptxs];
+                for (int py = 0; py < bh; py += pth) {
+                    for (int px = 0; px < bw; px += ptw) {
+                        for (int y = 0; y < pth; y += th) {
+                            for (int x = 0; x < ptw; x += tw) {
+                                tx_org[bs][1][depth][k++] = (Position){px + x, py + y};
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
 
 static const int8_t fdct4_range_mult2[4]    = {0, 2, 3, 3};
 static const int8_t fdct8_range_mult2[6]    = {0, 2, 4, 5, 5, 5};
@@ -3376,6 +2796,7 @@ void svt_av1_fwd_txfm2d_4x8_c(int16_t* input, int32_t* output, uint32_t input_st
         input, input_stride, output, &cfg, intermediate_transform_buffer, bit_depth);
 }
 
+#if CONFIG_ENABLE_TX_PF_N2 && CONFIG_ENABLE_TX_PF_ALL
 static EbErrorType av1_estimate_transform_N2(int16_t* residual_buffer, uint32_t residual_stride, int32_t* coeff_buffer,
                                              uint32_t coeff_stride, TxSize transform_size, uint64_t* three_quad_energy,
                                              uint32_t bit_depth, TxType transform_type, PlaneType component_type)
@@ -3532,6 +2953,7 @@ static EbErrorType av1_estimate_transform_N2(int16_t* residual_buffer, uint32_t 
 
     return return_error;
 }
+#endif // CONFIG_ENABLE_TX_PF_N2 && CONFIG_ENABLE_TX_PF_ALL
 
 static EbErrorType av1_estimate_transform_N4(int16_t* residual_buffer, uint32_t residual_stride, int32_t* coeff_buffer,
                                              uint32_t coeff_stride, TxSize transform_size, uint64_t* three_quad_energy,
@@ -3545,10 +2967,14 @@ static EbErrorType av1_estimate_transform_N4(int16_t* residual_buffer, uint32_t 
 
     switch (transform_size) {
     case TX_64X32:
-        if (transform_type == DCT_DCT) {
-            svt_av1_fwd_txfm2d_64x32_N4(residual_buffer, coeff_buffer, residual_stride, transform_type, bit_depth);
-        } else {
+#if CONFIG_ENABLE_NON_DCT_LARGE_TX
+        if (transform_type != DCT_DCT) {
             svt_av1_fwd_txfm2d_64x32_N4_c(residual_buffer, coeff_buffer, residual_stride, transform_type, bit_depth);
+        } else
+#endif
+        {
+            assert(transform_type == DCT_DCT); // non-DCT at large/rect tx forbidden by ext-tx set
+            svt_av1_fwd_txfm2d_64x32_N4(residual_buffer, coeff_buffer, residual_stride, transform_type, bit_depth);
         }
 
         *three_quad_energy = svt_handle_transform64x32_N2_N4(coeff_buffer);
@@ -3556,10 +2982,14 @@ static EbErrorType av1_estimate_transform_N4(int16_t* residual_buffer, uint32_t 
         break;
 
     case TX_32X64:
-        if (transform_type == DCT_DCT) {
-            svt_av1_fwd_txfm2d_32x64_N4(residual_buffer, coeff_buffer, residual_stride, transform_type, bit_depth);
-        } else {
+#if CONFIG_ENABLE_NON_DCT_LARGE_TX
+        if (transform_type != DCT_DCT) {
             svt_av1_fwd_txfm2d_32x64_N4_c(residual_buffer, coeff_buffer, residual_stride, transform_type, bit_depth);
+        } else
+#endif
+        {
+            assert(transform_type == DCT_DCT); // non-DCT at large/rect tx forbidden by ext-tx set
+            svt_av1_fwd_txfm2d_32x64_N4(residual_buffer, coeff_buffer, residual_stride, transform_type, bit_depth);
         }
 
         *three_quad_energy = svt_handle_transform32x64_N2_N4(coeff_buffer);
@@ -3567,10 +2997,14 @@ static EbErrorType av1_estimate_transform_N4(int16_t* residual_buffer, uint32_t 
         break;
 
     case TX_64X16:
-        if (transform_type == DCT_DCT) {
-            svt_av1_fwd_txfm2d_64x16_N4(residual_buffer, coeff_buffer, residual_stride, transform_type, bit_depth);
-        } else {
+#if CONFIG_ENABLE_NON_DCT_LARGE_TX
+        if (transform_type != DCT_DCT) {
             svt_av1_fwd_txfm2d_64x16_N4_c(residual_buffer, coeff_buffer, residual_stride, transform_type, bit_depth);
+        } else
+#endif
+        {
+            assert(transform_type == DCT_DCT); // non-DCT at large/rect tx forbidden by ext-tx set
+            svt_av1_fwd_txfm2d_64x16_N4(residual_buffer, coeff_buffer, residual_stride, transform_type, bit_depth);
         }
 
         *three_quad_energy = svt_handle_transform64x16_N2_N4(coeff_buffer);
@@ -3578,10 +3012,14 @@ static EbErrorType av1_estimate_transform_N4(int16_t* residual_buffer, uint32_t 
         break;
 
     case TX_16X64:
-        if (transform_type == DCT_DCT) {
-            svt_av1_fwd_txfm2d_16x64_N4(residual_buffer, coeff_buffer, residual_stride, transform_type, bit_depth);
-        } else {
+#if CONFIG_ENABLE_NON_DCT_LARGE_TX
+        if (transform_type != DCT_DCT) {
             svt_av1_fwd_txfm2d_16x64_N4_c(residual_buffer, coeff_buffer, residual_stride, transform_type, bit_depth);
+        } else
+#endif
+        {
+            assert(transform_type == DCT_DCT); // non-DCT at large/rect tx forbidden by ext-tx set
+            svt_av1_fwd_txfm2d_16x64_N4(residual_buffer, coeff_buffer, residual_stride, transform_type, bit_depth);
         }
 
         *three_quad_energy = svt_handle_transform16x64_N2_N4(coeff_buffer);
@@ -3590,18 +3028,26 @@ static EbErrorType av1_estimate_transform_N4(int16_t* residual_buffer, uint32_t 
 
     case TX_32X16:
         // TTK
-        if ((transform_type == DCT_DCT) || (transform_type == IDTX)) {
-            svt_av1_fwd_txfm2d_32x16_N4(residual_buffer, coeff_buffer, residual_stride, transform_type, bit_depth);
-        } else {
+#if CONFIG_ENABLE_NON_DCT_LARGE_TX
+        if (transform_type != DCT_DCT && transform_type != IDTX) {
             svt_av1_fwd_txfm2d_32x16_N4_c(residual_buffer, coeff_buffer, residual_stride, transform_type, bit_depth);
+        } else
+#endif
+        {
+            assert(transform_type == DCT_DCT || transform_type == IDTX);
+            svt_av1_fwd_txfm2d_32x16_N4(residual_buffer, coeff_buffer, residual_stride, transform_type, bit_depth);
         }
         break;
 
     case TX_16X32:
-        if ((transform_type == DCT_DCT) || (transform_type == IDTX)) {
-            svt_av1_fwd_txfm2d_16x32_N4(residual_buffer, coeff_buffer, residual_stride, transform_type, bit_depth);
-        } else {
+#if CONFIG_ENABLE_NON_DCT_LARGE_TX
+        if (transform_type != DCT_DCT && transform_type != IDTX) {
             svt_av1_fwd_txfm2d_16x32_N4_c(residual_buffer, coeff_buffer, residual_stride, transform_type, bit_depth);
+        } else
+#endif
+        {
+            assert(transform_type == DCT_DCT || transform_type == IDTX);
+            svt_av1_fwd_txfm2d_16x32_N4(residual_buffer, coeff_buffer, residual_stride, transform_type, bit_depth);
         }
         break;
 
@@ -3614,18 +3060,26 @@ static EbErrorType av1_estimate_transform_N4(int16_t* residual_buffer, uint32_t 
         break;
 
     case TX_32X8:
-        if ((transform_type == DCT_DCT) || (transform_type == IDTX)) {
-            svt_av1_fwd_txfm2d_32x8_N4(residual_buffer, coeff_buffer, residual_stride, transform_type, bit_depth);
-        } else {
+#if CONFIG_ENABLE_NON_DCT_LARGE_TX
+        if (transform_type != DCT_DCT && transform_type != IDTX) {
             svt_av1_fwd_txfm2d_32x8_N4_c(residual_buffer, coeff_buffer, residual_stride, transform_type, bit_depth);
+        } else
+#endif
+        {
+            assert(transform_type == DCT_DCT || transform_type == IDTX);
+            svt_av1_fwd_txfm2d_32x8_N4(residual_buffer, coeff_buffer, residual_stride, transform_type, bit_depth);
         }
         break;
 
     case TX_8X32:
-        if ((transform_type == DCT_DCT) || (transform_type == IDTX)) {
-            svt_av1_fwd_txfm2d_8x32_N4(residual_buffer, coeff_buffer, residual_stride, transform_type, bit_depth);
-        } else {
+#if CONFIG_ENABLE_NON_DCT_LARGE_TX
+        if (transform_type != DCT_DCT && transform_type != IDTX) {
             svt_av1_fwd_txfm2d_8x32_N4_c(residual_buffer, coeff_buffer, residual_stride, transform_type, bit_depth);
+        } else
+#endif
+        {
+            assert(transform_type == DCT_DCT || transform_type == IDTX);
+            svt_av1_fwd_txfm2d_8x32_N4(residual_buffer, coeff_buffer, residual_stride, transform_type, bit_depth);
         }
         break;
     case TX_16X4:
@@ -3654,14 +3108,16 @@ static EbErrorType av1_estimate_transform_N4(int16_t* residual_buffer, uint32_t 
         break;
 
     case TX_32X32:
+#if CONFIG_ENABLE_NON_DCT_LARGE_TX
         if (transform_type == V_DCT || transform_type == H_DCT || transform_type == V_ADST ||
             transform_type == H_ADST || transform_type == V_FLIPADST || transform_type == H_FLIPADST) {
-            // Tahani: I believe those cases are never hit
+            // Non-DCT at 32x32 is forbidden by the ext-tx set (never hit); C fallback only.
             svt_aom_transform_two_d_32x32_N4_c(
                 residual_buffer, coeff_buffer, residual_stride, transform_type, bit_depth);
-        }
-
-        else {
+        } else
+#endif
+        {
+            assert(transform_type == DCT_DCT || transform_type == IDTX);
             svt_av1_fwd_txfm2d_32x32_N4(residual_buffer, coeff_buffer, residual_stride, transform_type, bit_depth);
         }
 
@@ -3690,6 +3146,7 @@ static EbErrorType av1_estimate_transform_N4(int16_t* residual_buffer, uint32_t 
     return return_error;
 }
 
+#if CONFIG_ENABLE_TX_PF_ALL
 static EbErrorType av1_estimate_transform_ONLY_DC(int16_t* residual_buffer, uint32_t residual_stride,
                                                   int32_t* coeff_buffer, uint32_t coeff_stride, TxSize transform_size,
                                                   uint64_t* three_quad_energy, uint32_t bit_depth,
@@ -3714,6 +3171,7 @@ static EbErrorType av1_estimate_transform_ONLY_DC(int16_t* residual_buffer, uint
     }
     return return_error;
 }
+#endif // CONFIG_ENABLE_TX_PF_ALL
 
 static EbErrorType av1_estimate_transform_default(int16_t* residual_buffer, uint32_t residual_stride,
                                                   int32_t* coeff_buffer, uint32_t coeff_stride, TxSize transform_size,
@@ -3728,10 +3186,14 @@ static EbErrorType av1_estimate_transform_default(int16_t* residual_buffer, uint
 
     switch (transform_size) {
     case TX_64X32:
-        if (transform_type == DCT_DCT) {
-            svt_av1_fwd_txfm2d_64x32(residual_buffer, coeff_buffer, residual_stride, transform_type, bit_depth);
-        } else {
+#if CONFIG_ENABLE_NON_DCT_LARGE_TX
+        if (transform_type != DCT_DCT) {
             svt_av1_fwd_txfm2d_64x32_c(residual_buffer, coeff_buffer, residual_stride, transform_type, bit_depth);
+        } else
+#endif
+        {
+            assert(transform_type == DCT_DCT); // non-DCT at large/rect tx forbidden by ext-tx set
+            svt_av1_fwd_txfm2d_64x32(residual_buffer, coeff_buffer, residual_stride, transform_type, bit_depth);
         }
 
         *three_quad_energy = svt_handle_transform64x32(coeff_buffer);
@@ -3739,10 +3201,14 @@ static EbErrorType av1_estimate_transform_default(int16_t* residual_buffer, uint
         break;
 
     case TX_32X64:
-        if (transform_type == DCT_DCT) {
-            svt_av1_fwd_txfm2d_32x64(residual_buffer, coeff_buffer, residual_stride, transform_type, bit_depth);
-        } else {
+#if CONFIG_ENABLE_NON_DCT_LARGE_TX
+        if (transform_type != DCT_DCT) {
             svt_av1_fwd_txfm2d_32x64_c(residual_buffer, coeff_buffer, residual_stride, transform_type, bit_depth);
+        } else
+#endif
+        {
+            assert(transform_type == DCT_DCT); // non-DCT at large/rect tx forbidden by ext-tx set
+            svt_av1_fwd_txfm2d_32x64(residual_buffer, coeff_buffer, residual_stride, transform_type, bit_depth);
         }
 
         *three_quad_energy = svt_handle_transform32x64(coeff_buffer);
@@ -3750,10 +3216,14 @@ static EbErrorType av1_estimate_transform_default(int16_t* residual_buffer, uint
         break;
 
     case TX_64X16:
-        if (transform_type == DCT_DCT) {
-            svt_av1_fwd_txfm2d_64x16(residual_buffer, coeff_buffer, residual_stride, transform_type, bit_depth);
-        } else {
+#if CONFIG_ENABLE_NON_DCT_LARGE_TX
+        if (transform_type != DCT_DCT) {
             svt_av1_fwd_txfm2d_64x16_c(residual_buffer, coeff_buffer, residual_stride, transform_type, bit_depth);
+        } else
+#endif
+        {
+            assert(transform_type == DCT_DCT); // non-DCT at large/rect tx forbidden by ext-tx set
+            svt_av1_fwd_txfm2d_64x16(residual_buffer, coeff_buffer, residual_stride, transform_type, bit_depth);
         }
 
         *three_quad_energy = svt_handle_transform64x16(coeff_buffer);
@@ -3761,10 +3231,14 @@ static EbErrorType av1_estimate_transform_default(int16_t* residual_buffer, uint
         break;
 
     case TX_16X64:
-        if (transform_type == DCT_DCT) {
-            svt_av1_fwd_txfm2d_16x64(residual_buffer, coeff_buffer, residual_stride, transform_type, bit_depth);
-        } else {
+#if CONFIG_ENABLE_NON_DCT_LARGE_TX
+        if (transform_type != DCT_DCT) {
             svt_av1_fwd_txfm2d_16x64_c(residual_buffer, coeff_buffer, residual_stride, transform_type, bit_depth);
+        } else
+#endif
+        {
+            assert(transform_type == DCT_DCT); // non-DCT at large/rect tx forbidden by ext-tx set
+            svt_av1_fwd_txfm2d_16x64(residual_buffer, coeff_buffer, residual_stride, transform_type, bit_depth);
         }
 
         *three_quad_energy = svt_handle_transform16x64(coeff_buffer);
@@ -3773,18 +3247,26 @@ static EbErrorType av1_estimate_transform_default(int16_t* residual_buffer, uint
 
     case TX_32X16:
         // TTK
-        if ((transform_type == DCT_DCT) || (transform_type == IDTX)) {
-            svt_av1_fwd_txfm2d_32x16(residual_buffer, coeff_buffer, residual_stride, transform_type, bit_depth);
-        } else {
+#if CONFIG_ENABLE_NON_DCT_LARGE_TX
+        if (transform_type != DCT_DCT && transform_type != IDTX) {
             svt_av1_fwd_txfm2d_32x16_c(residual_buffer, coeff_buffer, residual_stride, transform_type, bit_depth);
+        } else
+#endif
+        {
+            assert(transform_type == DCT_DCT || transform_type == IDTX);
+            svt_av1_fwd_txfm2d_32x16(residual_buffer, coeff_buffer, residual_stride, transform_type, bit_depth);
         }
         break;
 
     case TX_16X32:
-        if ((transform_type == DCT_DCT) || (transform_type == IDTX)) {
-            svt_av1_fwd_txfm2d_16x32(residual_buffer, coeff_buffer, residual_stride, transform_type, bit_depth);
-        } else {
+#if CONFIG_ENABLE_NON_DCT_LARGE_TX
+        if (transform_type != DCT_DCT && transform_type != IDTX) {
             svt_av1_fwd_txfm2d_16x32_c(residual_buffer, coeff_buffer, residual_stride, transform_type, bit_depth);
+        } else
+#endif
+        {
+            assert(transform_type == DCT_DCT || transform_type == IDTX);
+            svt_av1_fwd_txfm2d_16x32(residual_buffer, coeff_buffer, residual_stride, transform_type, bit_depth);
         }
         break;
 
@@ -3797,18 +3279,26 @@ static EbErrorType av1_estimate_transform_default(int16_t* residual_buffer, uint
         break;
 
     case TX_32X8:
-        if ((transform_type == DCT_DCT) || (transform_type == IDTX)) {
-            svt_av1_fwd_txfm2d_32x8(residual_buffer, coeff_buffer, residual_stride, transform_type, bit_depth);
-        } else {
+#if CONFIG_ENABLE_NON_DCT_LARGE_TX
+        if (transform_type != DCT_DCT && transform_type != IDTX) {
             svt_av1_fwd_txfm2d_32x8_c(residual_buffer, coeff_buffer, residual_stride, transform_type, bit_depth);
+        } else
+#endif
+        {
+            assert(transform_type == DCT_DCT || transform_type == IDTX);
+            svt_av1_fwd_txfm2d_32x8(residual_buffer, coeff_buffer, residual_stride, transform_type, bit_depth);
         }
         break;
 
     case TX_8X32:
-        if ((transform_type == DCT_DCT) || (transform_type == IDTX)) {
-            svt_av1_fwd_txfm2d_8x32(residual_buffer, coeff_buffer, residual_stride, transform_type, bit_depth);
-        } else {
+#if CONFIG_ENABLE_NON_DCT_LARGE_TX
+        if (transform_type != DCT_DCT && transform_type != IDTX) {
             svt_av1_fwd_txfm2d_8x32_c(residual_buffer, coeff_buffer, residual_stride, transform_type, bit_depth);
+        } else
+#endif
+        {
+            assert(transform_type == DCT_DCT || transform_type == IDTX);
+            svt_av1_fwd_txfm2d_8x32(residual_buffer, coeff_buffer, residual_stride, transform_type, bit_depth);
         }
         break;
     case TX_16X4:
@@ -3837,13 +3327,15 @@ static EbErrorType av1_estimate_transform_default(int16_t* residual_buffer, uint
         break;
 
     case TX_32X32:
+#if CONFIG_ENABLE_NON_DCT_LARGE_TX
         if (transform_type == V_DCT || transform_type == H_DCT || transform_type == V_ADST ||
             transform_type == H_ADST || transform_type == V_FLIPADST || transform_type == H_FLIPADST) {
-            // Tahani: I believe those cases are never hit
+            // Non-DCT at 32x32 is forbidden by the ext-tx set (never hit); C fallback only.
             svt_av1_transform_two_d_32x32_c(residual_buffer, coeff_buffer, residual_stride, transform_type, bit_depth);
-        }
-
-        else {
+        } else
+#endif
+        {
+            assert(transform_type == DCT_DCT || transform_type == IDTX);
             svt_av1_fwd_txfm2d_32x32(residual_buffer, coeff_buffer, residual_stride, transform_type, bit_depth);
         }
 
@@ -3971,6 +3463,7 @@ EbErrorType svt_aom_estimate_transform(PictureControlSet* pcs, ModeDecisionConte
                                               bit_depth,
                                               transform_type,
                                               component_type);
+#if CONFIG_ENABLE_TX_PF_N2 && CONFIG_ENABLE_TX_PF_ALL
     case N2_SHAPE:
         return av1_estimate_transform_N2(residual_buffer,
                                          residual_stride,
@@ -3981,6 +3474,7 @@ EbErrorType svt_aom_estimate_transform(PictureControlSet* pcs, ModeDecisionConte
                                          bit_depth,
                                          transform_type,
                                          component_type);
+#endif
     case N4_SHAPE:
         return av1_estimate_transform_N4(residual_buffer,
                                          residual_stride,
@@ -3991,6 +3485,7 @@ EbErrorType svt_aom_estimate_transform(PictureControlSet* pcs, ModeDecisionConte
                                          bit_depth,
                                          transform_type,
                                          component_type);
+#if CONFIG_ENABLE_TX_PF_ALL
     case ONLY_DC_SHAPE:
         return av1_estimate_transform_ONLY_DC(residual_buffer,
                                               residual_stride,
@@ -4001,6 +3496,9 @@ EbErrorType svt_aom_estimate_transform(PictureControlSet* pcs, ModeDecisionConte
                                               bit_depth,
                                               transform_type,
                                               component_type);
+#endif
+    default:
+        break;
     }
 
     assert(0);
@@ -4119,6 +3617,8 @@ static void highbd_fwd_txfm_32x8_n4(int16_t* src_diff, TranLow* coeff, int diff_
 }
 
 //PF_N2
+// CONFIG_ENABLE_TX_PF_ALL: TPL (the only N2 user) codes 16x16, 16x4 and 32x8 only.
+#if CONFIG_ENABLE_TX_PF_ALL
 static void highbd_fwd_txfm_64x64_n2(int16_t* src_diff, TranLow* coeff, int diff_stride, TxfmParam* txfm_param) {
     assert(txfm_param->tx_type == DCT_DCT);
     int32_t*  dst_coeff = (int32_t*)coeff;
@@ -4160,6 +3660,7 @@ static void highbd_fwd_txfm_32x32_n2(int16_t* src_diff, TranLow* coeff, int diff
     const int    bd        = txfm_param->bd;
     svt_av1_fwd_txfm2d_32x32_N2(src_diff, dst_coeff, diff_stride, tx_type, bd);
 }
+#endif // CONFIG_ENABLE_TX_PF_ALL
 
 static void highbd_fwd_txfm_16x16_n2(int16_t* src_diff, TranLow* coeff, int diff_stride, TxfmParam* txfm_param) {
     int32_t*     dst_coeff = (int32_t*)coeff;
@@ -4168,6 +3669,7 @@ static void highbd_fwd_txfm_16x16_n2(int16_t* src_diff, TranLow* coeff, int diff
     svt_av1_fwd_txfm2d_16x16_N2(src_diff, dst_coeff, diff_stride, tx_type, bd);
 }
 
+#if CONFIG_ENABLE_TX_PF_ALL
 static void highbd_fwd_txfm_8x8_n2(int16_t* src_diff, TranLow* coeff, int diff_stride, TxfmParam* txfm_param) {
     int32_t*     dst_coeff = (int32_t*)coeff;
     const TxType tx_type   = txfm_param->tx_type;
@@ -4213,16 +3715,19 @@ static void highbd_fwd_txfm_4x16_n2(int16_t* src_diff, TranLow* coeff, int diff_
     int32_t* dst_coeff = (int32_t*)coeff;
     svt_av1_fwd_txfm2d_4x16(src_diff, dst_coeff, diff_stride, txfm_param->tx_type, txfm_param->bd);
 }
+#endif // CONFIG_ENABLE_TX_PF_ALL
 
 static void highbd_fwd_txfm_16x4_n2(int16_t* src_diff, TranLow* coeff, int diff_stride, TxfmParam* txfm_param) {
     int32_t* dst_coeff = (int32_t*)coeff;
     svt_av1_fwd_txfm2d_16x4_N2(src_diff, dst_coeff, diff_stride, txfm_param->tx_type, txfm_param->bd);
 }
 
+#if CONFIG_ENABLE_TX_PF_ALL
 static void highbd_fwd_txfm_8x32_n2(int16_t* src_diff, TranLow* coeff, int diff_stride, TxfmParam* txfm_param) {
     int32_t* dst_coeff = (int32_t*)coeff;
     svt_av1_fwd_txfm2d_8x32_N2(src_diff, dst_coeff, diff_stride, txfm_param->tx_type, txfm_param->bd);
 }
+#endif // CONFIG_ENABLE_TX_PF_ALL
 
 static void highbd_fwd_txfm_32x8_n2(int16_t* src_diff, TranLow* coeff, int diff_stride, TxfmParam* txfm_param) {
     int32_t* dst_coeff = (int32_t*)coeff;
@@ -4410,6 +3915,7 @@ void svt_av1_highbd_fwd_txfm_n2(int16_t* src_diff, TranLow* coeff, int diff_stri
     assert(av1_ext_tx_used[txfm_param->tx_set_type][txfm_param->tx_type]);
     const TxSize tx_size = txfm_param->tx_size;
     switch (tx_size) {
+#if CONFIG_ENABLE_TX_PF_ALL
     case TX_64X64:
         highbd_fwd_txfm_64x64_n2(src_diff, coeff, diff_stride, txfm_param);
         break;
@@ -4428,9 +3934,11 @@ void svt_av1_highbd_fwd_txfm_n2(int16_t* src_diff, TranLow* coeff, int diff_stri
     case TX_32X32:
         highbd_fwd_txfm_32x32_n2(src_diff, coeff, diff_stride, txfm_param);
         break;
+#endif // CONFIG_ENABLE_TX_PF_ALL
     case TX_16X16:
         highbd_fwd_txfm_16x16_n2(src_diff, coeff, diff_stride, txfm_param);
         break;
+#if CONFIG_ENABLE_TX_PF_ALL
     case TX_8X8:
         highbd_fwd_txfm_8x8_n2(src_diff, coeff, diff_stride, txfm_param);
         break;
@@ -4458,12 +3966,15 @@ void svt_av1_highbd_fwd_txfm_n2(int16_t* src_diff, TranLow* coeff, int diff_stri
     case TX_4X16:
         highbd_fwd_txfm_4x16_n2(src_diff, coeff, diff_stride, txfm_param);
         break;
+#endif // CONFIG_ENABLE_TX_PF_ALL
     case TX_16X4:
         highbd_fwd_txfm_16x4_n2(src_diff, coeff, diff_stride, txfm_param);
         break;
+#if CONFIG_ENABLE_TX_PF_ALL
     case TX_8X32:
         highbd_fwd_txfm_8x32_n2(src_diff, coeff, diff_stride, txfm_param);
         break;
+#endif // CONFIG_ENABLE_TX_PF_ALL
     case TX_32X8:
         highbd_fwd_txfm_32x8_n2(src_diff, coeff, diff_stride, txfm_param);
         break;
@@ -4558,7 +4069,12 @@ void svt_av1_wht_fwd_txfm(int16_t* src_diff, int bw, int32_t* coeff, TxSize tx_s
         svt_av1_highbd_fwd_txfm_n2(src_diff, coeff, bw, &txfm_param);
         break;
     default:
+#if CONFIG_ENABLE_TPL_HQ
         svt_av1_highbd_fwd_txfm(src_diff, coeff, bw, &txfm_param);
+#else
+        // CONFIG_ENABLE_TPL_HQ: TPL params levels 4/5 use the N2/N4 shapes only.
+        assert(0);
+#endif
     }
 }
 

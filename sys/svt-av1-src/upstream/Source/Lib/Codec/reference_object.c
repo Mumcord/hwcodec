@@ -83,7 +83,7 @@ svt_reference_param_update: update the parameters in EbReferenceObject for chang
 EbErrorType svt_reference_param_update(EbReferenceObject* ref_object, SequenceControlSet* scs) {
     EbPictureBufferDescInitData picture_buffer_desc_init_data_ptr;
 
-    bool is_16bit = scs->static_config.encoder_bit_depth > EB_EIGHT_BIT;
+    bool is_16bit = SVT_EFFECTIVE_BIT_DEPTH(scs->static_config.encoder_bit_depth) > EB_EIGHT_BIT;
     // Initialize the various Picture types
     picture_buffer_desc_init_data_ptr.max_width           = scs->max_input_luma_width;
     picture_buffer_desc_init_data_ptr.max_height          = scs->max_input_luma_height;
@@ -99,7 +99,7 @@ EbErrorType svt_reference_param_update(EbReferenceObject* ref_object, SequenceCo
 
     picture_buffer_desc_init_data_ptr.border            = padding;
     picture_buffer_desc_init_data_ptr.mfmv              = scs->mfmv_enabled;
-    picture_buffer_desc_init_data_ptr.is_16bit_pipeline = scs->is_16bit_pipeline;
+    picture_buffer_desc_init_data_ptr.is_16bit_pipeline = SVT_EFFECTIVE_IS_16BIT_PIPELINE(scs->is_16bit_pipeline);
 
     picture_buffer_desc_init_data_ptr.split_mode = false;
     if (is_16bit) {
@@ -180,10 +180,11 @@ EbErrorType svt_reference_object_ctor(EbReferenceObject* ref_object, EbPtr objec
 
     ref_object->mi_rows = mi_rows;
     ref_object->mi_cols = mi_cols;
+    ref_object->r0      = 0.0;
     EB_MALLOC_ARRAY(ref_object->sb_intra, picture_buffer_desc_init_data_ptr->sb_total_count);
     EB_MALLOC_ARRAY(ref_object->sb_skip, picture_buffer_desc_init_data_ptr->sb_total_count);
     EB_MALLOC_ARRAY(ref_object->sb_64x64_mvp, picture_buffer_desc_init_data_ptr->sb_total_count);
-    EB_MALLOC_ARRAY(ref_object->sb_me_64x64_dist, picture_buffer_desc_init_data_ptr->sb_total_count);
+    EB_CALLOC_ARRAY(ref_object->sb_me_64x64_dist, picture_buffer_desc_init_data_ptr->sb_total_count);
     EB_MALLOC_ARRAY(ref_object->sb_me_8x8_cost_var, picture_buffer_desc_init_data_ptr->sb_total_count);
     EB_MALLOC_ARRAY(ref_object->sb_min_sq_size, picture_buffer_desc_init_data_ptr->sb_total_count);
     EB_MALLOC_ARRAY(ref_object->sb_max_sq_size, picture_buffer_desc_init_data_ptr->sb_total_count);

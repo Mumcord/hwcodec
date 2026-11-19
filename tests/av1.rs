@@ -59,6 +59,34 @@ fn round_trip_keeps_quality() {
     }
 }
 
+/// SVT-AV1 4.2 read the reference block of its sub-pixel variance kernel with an aligned load
+/// that is not always aligned. On x86 CPUs without AVX2 the mode decision picks that kernel, so
+/// the encoder killed the whole process with a general protection fault. Detailed content at
+/// these sizes sends the mode decision down that path: on 4.2.0 this test aborts the test binary,
+/// on 4.3.0 every frame encodes and decodes.
+#[test]
+fn detailed_content_at_480p_and_720p() {
+    for (width, height) in [(854, 480), (1280, 720)] {
+        let mut encoder = encoder(width, height, 30);
+        let mut decoder = Av1Decoder::new().expect("decoder");
+        for index in 0..30 {
+            let encoded = encoder
+                .encode(
+                    &scrolling_text(width, height, index),
+                    i64::from(index * 1000 / 30),
+                    false,
+                )
+                .expect("encode")
+                .remove(0);
+            let decoded = decoder
+                .decode(&encoded.data)
+                .expect("decode")
+                .expect("picture");
+            assert_eq!((decoded.width(), decoded.height()), (width, height));
+        }
+    }
+}
+
 fn layers(fps: u32, frames: u32) -> Vec<u8> {
     let mut encoder = encoder(640, 480, fps);
     (0..frames)

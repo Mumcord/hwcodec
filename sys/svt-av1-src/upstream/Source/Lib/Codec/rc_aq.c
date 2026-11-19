@@ -403,9 +403,9 @@ void svt_av1_generate_b64_me_qindex_map(PictureControlSet* pcs) {
             int diff_dist = (int)(ppcs->me_8x8_cost_variance[b64_idx] - avg_dist);
             int offset    = 0;
             if (diff_dist < 0) {
-                offset = min_offset[tl_index] * diff_dist / (min_dist - avg_dist);
+                offset = (int)(min_offset[tl_index] * diff_dist / (min_dist - avg_dist));
             } else if (diff_dist > 0) {
-                offset = max_offset[tl_index] * diff_dist / (max_dist - avg_dist);
+                offset = (int)(max_offset[tl_index] * diff_dist / (max_dist - avg_dist));
             }
             pcs->b64_me_qindex[b64_idx] = CLIP3(min_q_idx, max_q_idx, base_q_idx + offset);
         }
@@ -484,7 +484,7 @@ static void sb_setup_lambda(PictureControlSet* pcs, SuperBlock* sb_ptr) {
     }
     assert(base_block_count > 0);
 
-    EbBitDepth bit_depth   = pcs->hbd_md ? EB_TEN_BIT : EB_EIGHT_BIT;
+    EbBitDepth bit_depth   = SVT_EFFECTIVE_HBD_MD(pcs->hbd_md) ? EB_TEN_BIT : EB_EIGHT_BIT;
     double     orig_rdmult = svt_aom_compute_rd_mult(
         pcs, ppcs->frm_hdr.quantization_params.base_q_idx, ppcs->frm_hdr.quantization_params.base_q_idx, bit_depth);
     double new_rdmult = svt_aom_compute_rd_mult(
@@ -620,8 +620,10 @@ void svt_av1_rc_init_sb_qindex(PictureControlSet* pcs, SequenceControlSet* scs) 
             svt_av1_variance_adjust_qp(pcs);
         }
         // QPM with tpl_la
-        if (scs->static_config.aq_mode == 2 && ppcs->tpl_ctrls.enable && ppcs->r0 != 0) {
+#if CONFIG_ENABLE_TPL
+        if (scs->static_config.aq_mode == 2 && ppcs->tpl_ctrls.enable && ppcs->r0_gen) {
             svt_aom_sb_qp_derivation_tpl_la(pcs);
         }
+#endif
     }
 }

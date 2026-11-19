@@ -17,9 +17,6 @@
 //! run with the hardware features on, and VA-API additionally by `tests/vaapi.rs` on a machine whose
 //! driver encodes.
 //!
-//! SVT-AV1 refuses to open on a CPU without AVX2, so the AV1 branch of the software tests is
-//! skipped there; run them on an AVX2 machine (CI) to cover it.
-//!
 //! Run:
 //! `cargo test --test temporal_channels`
 //! (hardware mocks: `cargo test --lib`)
@@ -30,7 +27,7 @@ mod common;
 use common::pattern;
 use hwcodec::{
     AV1_TEMPORAL_LAYERS, Av1Decoder, Av1Encoder, Av1Options, EncodedFrame, EncoderConfig,
-    TEMPORAL_LAYERS, VideoDecoder, VideoEncoder, Vp9Decoder, Vp9Encoder, av1_cpu_supported,
+    TEMPORAL_LAYERS, VideoDecoder, VideoEncoder, Vp9Decoder, Vp9Encoder,
 };
 
 /// Video channels 1–4 carry layers 0–3.
@@ -86,18 +83,6 @@ fn channel(frame: &EncodedFrame) -> u8 {
     1 + frame.temporal_layer
 }
 
-/// The software paths this machine can actually open. SVT-AV1 refuses to start on a CPU
-/// without AVX2, and that is an environment limit, not a D3 result.
-fn software_paths() -> impl Iterator<Item = Path> {
-    let av1 = av1_cpu_supported();
-    if !av1 {
-        eprintln!("skipping AV1 (SVT-AV1): this CPU has no AVX2");
-    }
-    Path::BOTH
-        .into_iter()
-        .filter(move |path| *path != Path::Av1 || av1)
-}
-
 /// The D3 invariant for one emitted frame.
 fn check_frame(path: Path, count: u8, frame: &EncodedFrame, context: &str) {
     assert!(
@@ -144,7 +129,7 @@ fn encode(encoder: &mut dyn VideoEncoder, index: u32, keyframe: bool) -> Vec<Enc
 
 #[test]
 fn software_paths_report_channels_1_to_4() {
-    for path in software_paths() {
+    for path in Path::BOTH {
         assert_eq!(path.open(30).temporal_layers(), path.expected_layers());
         for fps in [15, 30, 60] {
             let mut encoder = path.open(fps);
@@ -189,7 +174,7 @@ fn a_forced_keyframe_is_channel_1_at_every_pattern_position() {
     // A three-layer pattern repeats every four frames (0-2-1-2); forcing a keyframe where a
     // higher layer would fall must still put it on layer 0. Eight positions cover the pattern
     // twice, and would catch a four-layer pattern too.
-    for path in software_paths() {
+    for path in Path::BOTH {
         for key_at in 0..8 {
             let mut encoder = path.open(30);
             let count = encoder.temporal_layers();
@@ -223,7 +208,7 @@ fn a_forced_keyframe_is_channel_1_at_every_pattern_position() {
 fn a_resolution_change_starts_on_channel_1() {
     // A sender forces a keyframe when the size changes because not every decoder follows a
     // size change on an inter frame; that keyframe must be layer 0.
-    for path in software_paths() {
+    for path in Path::BOTH {
         let mut encoder = path.open(30);
         let count = encoder.temporal_layers();
         for index in 0..5 {
@@ -260,7 +245,7 @@ fn a_resolution_change_starts_on_channel_1() {
 #[test]
 fn dropping_channels_above_a_layer_still_decodes() {
     // What a viewer with layer choice N sees: channels 1..=N+1 of the same encoded stream.
-    for path in software_paths() {
+    for path in Path::BOTH {
         let mut encoder = path.open(30);
         let count = encoder.temporal_layers();
         let frames: Vec<EncodedFrame> = (0..16)

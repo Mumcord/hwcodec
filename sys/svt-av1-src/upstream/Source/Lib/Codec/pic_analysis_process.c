@@ -461,7 +461,7 @@ static int32_t apply_denoise_2d(SequenceControlSet* scs, PictureParentControlSet
     if (svt_aom_denoise_and_model_run(denoise_and_model,
                                       inputPicturePointer,
                                       &pcs->frm_hdr.film_grain_params,
-                                      scs->static_config.encoder_bit_depth > EB_EIGHT_BIT)) {}
+                                      SVT_EFFECTIVE_BIT_DEPTH(scs->static_config.encoder_bit_depth) > EB_EIGHT_BIT)) {}
 
     EB_DELETE(denoise_and_model);
 
@@ -494,9 +494,8 @@ static EbErrorType apply_film_grain_table(SequenceControlSet* scs_ptr, PicturePa
 
     SVT_MEMCPY(dst_grain, src_grain, sizeof(*dst_grain));
 
-    frm_hdr->film_grain_params.apply_grain        = 1;
-    frm_hdr->film_grain_params.random_seed        = random_seed;
-    scs_ptr->seq_header.film_grain_params_present = 1;
+    frm_hdr->film_grain_params.apply_grain = 1;
+    frm_hdr->film_grain_params.random_seed = random_seed;
 
     return EB_ErrorNone;
 }
@@ -512,7 +511,9 @@ static EbErrorType apply_film_grain_table(SequenceControlSet* scs_ptr, PicturePa
  ************************************************/
 void svt_aom_picture_pre_processing_operations(PictureParentControlSet* pcs, SequenceControlSet* scs) {
 #if CONFIG_ENABLE_FILM_GRAIN
-    if (scs->static_config.fgs_table) {
+    if (pcs->has_film_grain_event && scs->seq_header.film_grain_params_present) {
+        pcs->frm_hdr.film_grain_params = pcs->film_grain_event;
+    } else if (scs->static_config.fgs_table) {
         apply_film_grain_table(scs, pcs);
     } else if (scs->static_config.film_grain_denoise_strength) {
         denoise_estimate_film_grain(scs, pcs);
@@ -744,7 +745,7 @@ static void pad_2b_compressed_input_picture(uint8_t* src_pic, uint32_t src_strid
  ************************************************/
 void svt_aom_pad_picture_to_multiple_of_min_blk_size_dimensions(SequenceControlSet*  scs,
                                                                 EbPictureBufferDesc* input_pic) {
-    bool is16_bit_input = scs->static_config.encoder_bit_depth > EB_EIGHT_BIT;
+    bool is16_bit_input = SVT_EFFECTIVE_BIT_DEPTH(scs->static_config.encoder_bit_depth) > EB_EIGHT_BIT;
 
     uint32_t       color_format  = input_pic->color_format;
     const uint16_t subsampling_x = (color_format == EB_YUV444 ? 0 : 1);
@@ -819,7 +820,7 @@ void svt_aom_pad_picture_to_multiple_of_min_blk_size_dimensions(SequenceControlS
  ************************************************/
 void svt_aom_pad_picture_to_multiple_of_min_blk_size_dimensions_16bit(SequenceControlSet*  scs,
                                                                       EbPictureBufferDesc* input_pic) {
-    assert(scs->static_config.encoder_bit_depth > EB_EIGHT_BIT);
+    assert(SVT_EFFECTIVE_BIT_DEPTH(scs->static_config.encoder_bit_depth) > EB_EIGHT_BIT);
 
     uint32_t      color_format  = input_pic->color_format;
     const uint8_t subsampling_x = (color_format == EB_YUV444 ? 0 : 1);
@@ -1561,7 +1562,7 @@ void svt_aom_pad_input_pictures(SequenceControlSet* scs, EbPictureBufferDesc* in
     uint32_t comp_stride_y  = input_pic->y_stride / 4;
     uint32_t comp_stride_uv = input_pic->u_stride / 4;
 
-    if (scs->static_config.encoder_bit_depth > EB_EIGHT_BIT) {
+    if (SVT_EFFECTIVE_BIT_DEPTH(scs->static_config.encoder_bit_depth) > EB_EIGHT_BIT) {
         if (input_pic->y_buffer_bit_inc) {
             svt_aom_generate_padding_compressed_10bit(input_pic->y_buffer_bit_inc,
                                                       comp_stride_y,
@@ -1593,7 +1594,7 @@ void svt_aom_pad_input_pictures(SequenceControlSet* scs, EbPictureBufferDesc* in
     }
 
     // PAD the bit inc buffer in 10bit
-    if (scs->static_config.encoder_bit_depth > EB_EIGHT_BIT) {
+    if (SVT_EFFECTIVE_BIT_DEPTH(scs->static_config.encoder_bit_depth) > EB_EIGHT_BIT) {
         if (input_pic->u_buffer_bit_inc) {
             svt_aom_generate_padding_compressed_10bit(input_pic->u_buffer_bit_inc,
                                                       comp_stride_uv,
@@ -1614,6 +1615,7 @@ void svt_aom_pad_input_pictures(SequenceControlSet* scs, EbPictureBufferDesc* in
     }
 }
 
+#if CONFIG_ENABLE_VMAF
 /*********************************************************************************
  *
  * @brief
@@ -1897,6 +1899,7 @@ static void vmaf_preprocess_frame(PictureAnalysisContext* pa_ctx, PictureParentC
     /* Step 4: apply the unsharp mask in place, writing the sharpened luma back over the source. */
     vmaf_unsharp_apply_frame(luma, blur_plane, luma, pic_width, pic_height, y_stride, sharp_amount, delta_clip);
 }
+#endif // CONFIG_ENABLE_VMAF
 
 /* Picture Analysis Kernel */
 
@@ -1954,7 +1957,9 @@ EbErrorType svt_aom_picture_analysis_kernel_iter(void* context) {
         EbPictureBufferDesc* input_padded_pic;
         {
             if (scs->static_config.tune == TUNE_VMAF) {
+#if CONFIG_ENABLE_VMAF
                 vmaf_preprocess_frame(pa_ctx, pcs);
+#endif
             }
             // Padding for input pictures
             svt_aom_pad_input_pictures(scs, input_pic);
@@ -2018,7 +2023,12 @@ EbErrorType svt_aom_picture_analysis_kernel_iter(void* context) {
                 }
                 break;
             case 3:
-                svt_aom_is_screen_content_antialiasing_aware(pcs);
+                // Only I-frame classes are kept, so detect here only on guaranteed I-frames;
+                // Picture Decision handles the remaining I-frames.
+                pcs->sc_aa_detected = scs->allintra || pcs->idr_flag;
+                if (pcs->sc_aa_detected) {
+                    svt_aom_is_screen_content_antialiasing_aware(pcs);
+                }
                 break;
             }
             // Luma-dominant detection in MT mode

@@ -22,6 +22,9 @@
 #include "EbSvtAv1Enc.h"
 #include <stdbool.h>
 
+#define SVT_STRINGIFY_(x) #x
+#define SVT_STRINGIFY(x) SVT_STRINGIFY_(x)
+
 #ifdef _WIN32
 #define inline __inline
 #elif __GNUC__
@@ -1436,11 +1439,38 @@ typedef enum ATTRIBUTE_PACKED {
 // onyxc_int.h
 #define CDEF_MAX_STRENGTHS 16
 
-#define UNDISP_QUEUE_SIZE (REF_FRAMES * 10)
+// A parked frame is redeemed by a show_existing_frame naming a dpb index, and the queue is filled
+// in decode order, so no more than REF_FRAMES can be outstanding
+#define UNDISP_QUEUE_SIZE REF_FRAMES
 
 /* Constant values while waiting for the sequence header */
 #define FRAME_ID_LENGTH 15
 #define DELTA_FRAME_ID_LENGTH 14
+
+// AV1 current_frame_id from a monotonic decode-order picture_number.
+//
+// The decoder requires consecutive ids to differ, and to differ by less than
+// 2^(FRAME_ID_LENGTH-1) in the forward modular direction. Stepping by one per
+// picture over the full span satisfies both, wrap included, and makes the
+// modular id difference equal the picture age for any age below one period.
+static INLINE uint32_t svt_aom_frame_id_from_pic_num(uint64_t picture_number) {
+    return (uint32_t)(picture_number % (1u << FRAME_ID_LENGTH));
+}
+
+// True when a reference of this picture age can no longer be addressed. The
+// decoder clears a slot's RefValid once the reference is older than
+// 2^delta_frame_id_len (mark_ref_frames), and only a refresh restores it.
+// Age is counted on picture_number rather than on frame ids, which wrap: an id
+// difference reads an anchor held past a full id period as recent again.
+static INLINE bool svt_aom_frame_id_age_unusable(uint64_t age, uint32_t delta_frame_id_len) {
+    return age == 0 || age > (1ull << delta_frame_id_len);
+}
+
+// The delta_frame_id_minus1 the header writer emits for a reference.
+static INLINE int32_t svt_aom_frame_id_delta_minus1(uint32_t current_id, uint32_t ref_id, uint32_t frame_id_len) {
+    const int32_t span = (int32_t)(1u << frame_id_len);
+    return (int32_t)((((int32_t)current_id - (int32_t)ref_id + span) % span)) - 1;
+}
 
 #define PRIMARY_REF_BITS 3
 #define PRIMARY_REF_NONE 7
@@ -1596,6 +1626,9 @@ static INLINE bool is_inter_mode(PredictionMode mode) {
 }
 
 static INLINE int32_t is_inter_compound_mode(PredictionMode mode) {
+    if (!CONFIG_ENABLE_INTER_COMPOUND) {
+        return 0; // single-ref: no compound modes -> const-folds, cascades DCE
+    }
     return mode >= NEAREST_NEARESTMV && mode <= NEW_NEWMV;
 }
 
@@ -1636,6 +1669,7 @@ typedef enum FrameContextIndex {
 #define QINDEX_BITS 8
 #define MIN_QP_VALUE 0
 #define MAX_QP_VALUE 63
+#define LAMBDA_WEIGHT_NEUTRAL 128
 // Total number of QM sets stored
 #define QM_LEVEL_BITS 4
 #define NUM_QM_LEVELS (1 << QM_LEVEL_BITS)
@@ -1756,6 +1790,7 @@ typedef struct ScaleFactors {
     int32_t y_scale_fp; // vertical fixed point scale factor
     int32_t x_step_q4;
     int32_t y_step_q4;
+    int32_t is_scaled; // precomputed av1_is_scaled(sf); per-frame invariant
 
     int32_t (*scale_value_x)(int32_t val, const struct ScaleFactors* sf);
     int32_t (*scale_value_y)(int32_t val, const struct ScaleFactors* sf);
@@ -2174,6 +2209,17 @@ typedef enum {
 
 // Both SFRAME_FLEXIBLE_BASE and SFRAME_DEC_POSI_BASE use flexible insertion
 #define IS_SFRAME_FLEXIBLE_INSERT(mode) (mode == SFRAME_FLEXIBLE_BASE || mode == SFRAME_DEC_POSI_BASE)
+
+#if CONFIG_ENABLE_FAST_DECODE_3
+// Decoder-complexity rate terms added to RD costs, in rate units (1 bit = 1 << AV1_PROB_COST_SHIFT).
+// All zero when disabled.
+typedef struct DecCostCtrls {
+    bool     enabled;
+    int32_t  pos_rate;     // per coded coefficient scan position (all positions before eob)
+    uint64_t blk_rate;     // per coded block
+    uint64_t txsplit_rate; // per additional luma transform block of a transform split
+} DecCostCtrls;
+#endif
 
 #ifdef __cplusplus
 }

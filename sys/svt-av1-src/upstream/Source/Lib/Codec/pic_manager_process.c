@@ -572,6 +572,11 @@ EbErrorType svt_aom_picture_manager_kernel_iter(void* context) {
         bool refs_available = true;
         // For INTER frames, check that all references are available before starting the pic
         if (entry_ppcs->slice_type == B_SLICE) {
+            // Snapshot eos
+            svt_block_on_mutex(enc_ctx->total_number_of_shown_frames_mutex);
+            const bool terminating_sequence_flag_received = enc_ctx->terminating_sequence_flag_received;
+            svt_release_mutex(enc_ctx->total_number_of_shown_frames_mutex);
+
             for (REF_FRAME_MINUS1 ref = LAST; ref < ALT + 1; ref++) {
                 if (!refs_available) {
                     break;
@@ -584,7 +589,7 @@ EbErrorType svt_aom_picture_manager_kernel_iter(void* context) {
 
                 refs_available = (ref_entry == NULL) ? false
                     : (scs->static_config.rate_control_mode && entry_ppcs->temporal_layer_index == 0 &&
-                       !ref_entry->feedback_arrived && !enc_ctx->terminating_sequence_flag_received)
+                       !ref_entry->feedback_arrived && !terminating_sequence_flag_received)
                     ? false
                     : (entry_ppcs->frame_end_cdf_update_mode && !ref_entry->frame_context_updated)
                     ? false
@@ -615,7 +620,7 @@ EbErrorType svt_aom_picture_manager_kernel_iter(void* context) {
             // Give the new Reference a nominal live_count of 1
             svt_object_inc_live_count(entry_ppcs->ref_pic_wrapper, 1);
 #if SRM_REPORT
-            pcs->ref_pic_wrapper->pic_number = pcs->picture_number;
+            entry_ppcs->ref_pic_wrapper->pic_number = entry_ppcs->picture_number;
 #endif
         } else {
             entry_ppcs->ref_pic_wrapper = NULL;
@@ -674,7 +679,7 @@ EbErrorType svt_aom_picture_manager_kernel_iter(void* context) {
         child_pcs->b64_total_count      = entry_ppcs->b64_total_count;
 
         child_pcs->enc_dec_coded_sb_count = 0;
-        child_pcs->hbd_md                 = entry_ppcs->hbd_md;
+        child_pcs->hbd_md                 = SVT_EFFECTIVE_HBD_MD(entry_ppcs->hbd_md);
         context_ptr->pmgr_dec_order       = child_pcs->ppcs->decode_order;
         // Update consecutive_dec_order using the min-heap of pending decode orders.
         // When the next expected picture arrives, consecutive_dec_order is advanced
@@ -746,7 +751,7 @@ EbErrorType svt_aom_picture_manager_kernel_iter(void* context) {
             }
 
             // reset input_frame16bit to align with enhanced_pic
-            if (scs->static_config.encoder_bit_depth > EB_EIGHT_BIT) {
+            if (SVT_EFFECTIVE_BIT_DEPTH(scs->static_config.encoder_bit_depth) > EB_EIGHT_BIT) {
                 svt_aom_copy_buffer_info(entry_ppcs->enhanced_pic, child_pcs->input_frame16bit);
             }
         }
@@ -757,7 +762,7 @@ EbErrorType svt_aom_picture_manager_kernel_iter(void* context) {
         // copy buffer info from the downsampled picture to the input frame 16 bit
         // buffer
         if ((entry_ppcs->frame_superres_enabled || entry_ppcs->frame_resize_enabled) &&
-            scs->static_config.encoder_bit_depth > EB_EIGHT_BIT) {
+            SVT_EFFECTIVE_BIT_DEPTH(scs->static_config.encoder_bit_depth) > EB_EIGHT_BIT) {
             svt_aom_copy_buffer_info(entry_ppcs->enhanced_downscaled_pic, child_pcs->input_frame16bit);
         }
 
@@ -874,15 +879,8 @@ EbErrorType svt_aom_picture_manager_kernel_iter(void* context) {
             // off in low layers.
             child_pcs->ppcs->refresh_frame_context = REFRESH_FRAME_CONTEXT_BACKWARD;
         }
-        EbObjectWrapper* out_results_wrapper;
-        // Get Empty Results Object
-        svt_get_empty_object(context_ptr->picture_manager_output_fifo_ptr, &out_results_wrapper);
-        RateControlTasks* rc_tasks = (RateControlTasks*)out_results_wrapper->object_ptr;
-        rc_tasks->pcs_wrapper      = child_pcs->c_pcs_wrapper_ptr;
-        rc_tasks->task_type        = RC_INPUT;
-
-        // Post the Full Results Object
-        svt_post_full_object(out_results_wrapper);
+        // Read entry_ppcs before posting to RC: once posted, the parent PCS can be
+        // released and reused for the next input (single-PPCS pool in low delay).
         // Remove the Input Entry from the Input Queue
         input_entry->input_object_ptr = NULL;
         svt_block_on_mutex(enc_ctx->ref_pic_list_mutex);
@@ -897,6 +895,16 @@ EbErrorType svt_aom_picture_manager_kernel_iter(void* context) {
             }
         }
         svt_release_mutex(enc_ctx->ref_pic_list_mutex);
+
+        EbObjectWrapper* out_results_wrapper;
+        // Get Empty Results Object
+        svt_get_empty_object(context_ptr->picture_manager_output_fifo_ptr, &out_results_wrapper);
+        RateControlTasks* rc_tasks = (RateControlTasks*)out_results_wrapper->object_ptr;
+        rc_tasks->pcs_wrapper      = child_pcs->c_pcs_wrapper_ptr;
+        rc_tasks->task_type        = RC_INPUT;
+
+        // Post the Full Results Object
+        svt_post_full_object(out_results_wrapper);
     }
 
     svt_block_on_mutex(enc_ctx->ref_pic_list_mutex);

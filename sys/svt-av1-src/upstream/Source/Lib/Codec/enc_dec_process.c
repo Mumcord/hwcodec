@@ -78,7 +78,7 @@ EbErrorType svt_aom_enc_dec_context_ctor(EbThreadContext* thread_ctx, const EbEn
     thread_ctx->priv  = ed_ctx;
     thread_ctx->dctor = enc_dec_context_dctor;
 
-    ed_ctx->is_16bit = scs->is_16bit_pipeline;
+    ed_ctx->is_16bit = SVT_EFFECTIVE_IS_16BIT_PIPELINE(scs->is_16bit_pipeline);
 
     // Input/Output System Resource Manager FIFOs
     ed_ctx->mode_decision_input_fifo_ptr = svt_system_resource_get_consumer_fifo(
@@ -157,7 +157,7 @@ static void reset_encode_pass_neighbor_arrays(PictureControlSet* pcs, uint16_t t
     svt_aom_neighbor_array_unit_reset(pcs->ep_partition_context_na[tile_idx]);
     svt_aom_neighbor_array_unit_reset(pcs->ep_txfm_context_na[tile_idx]);
     // TODO(Joel): 8-bit ep_luma_recon_na (Cb,Cr) when is_16bit==0?
-    if (pcs->ppcs->scs->is_16bit_pipeline && !pcs->pic_bypass_encdec) {
+    if (SVT_EFFECTIVE_IS_16BIT_PIPELINE(pcs->ppcs->scs->is_16bit_pipeline) && !pcs->pic_bypass_encdec) {
         svt_aom_neighbor_array_unit_reset(pcs->ep_luma_recon_na_16bit[tile_idx]);
         svt_aom_neighbor_array_unit_reset(pcs->ep_cb_recon_na_16bit[tile_idx]);
         svt_aom_neighbor_array_unit_reset(pcs->ep_cr_recon_na_16bit[tile_idx]);
@@ -170,7 +170,7 @@ static void reset_encode_pass_neighbor_arrays(PictureControlSet* pcs, uint16_t t
  **************************************************/
 static void reset_enc_dec(EncDecContext* ed_ctx, PictureControlSet* pcs, SequenceControlSet* scs,
                           uint32_t segment_index) {
-    ed_ctx->is_16bit        = scs->is_16bit_pipeline;
+    ed_ctx->is_16bit        = SVT_EFFECTIVE_IS_16BIT_PIPELINE(scs->is_16bit_pipeline);
     ed_ctx->bit_depth       = scs->static_config.encoder_bit_depth;
     uint16_t tile_group_idx = ed_ctx->tile_group_index;
     svt_aom_lambda_assign(pcs,
@@ -423,7 +423,7 @@ void svt_aom_recon_output(PictureControlSet* pcs, SequenceControlSet* scs) {
     svt_block_on_mutex(enc_ctx->total_number_of_recon_frame_mutex);
 
     if (!pcs->ppcs->is_alt_ref) {
-        bool             is_16bit = (scs->static_config.encoder_bit_depth > EB_EIGHT_BIT);
+        bool             is_16bit = (SVT_EFFECTIVE_BIT_DEPTH(scs->static_config.encoder_bit_depth) > EB_EIGHT_BIT);
         EbObjectWrapper* output_recon_wrapper_ptr;
         // Get Recon Buffer
         svt_get_empty_object(scs->enc_ctx->recon_output_fifo_ptr, &output_recon_wrapper_ptr);
@@ -753,7 +753,7 @@ void free_temporal_filtering_buffer(PictureControlSet* pcs) {
 }
 
 EbErrorType svt_aom_ssim_calculations(PictureControlSet* pcs, SequenceControlSet* scs, bool free_memory) {
-    bool is_16bit = (scs->static_config.encoder_bit_depth > EB_EIGHT_BIT);
+    bool is_16bit = (SVT_EFFECTIVE_BIT_DEPTH(scs->static_config.encoder_bit_depth) > EB_EIGHT_BIT);
 
     const uint32_t ss_x = scs->subsampling_x;
     const uint32_t ss_y = scs->subsampling_y;
@@ -924,7 +924,7 @@ static int64_t get_sse_10bit(const uint8_t* a_hi, int32_t a_hi_stride, const uin
 }
 
 EbErrorType psnr_calculations(PictureControlSet* pcs, SequenceControlSet* scs, bool free_memory) {
-    bool is_16bit = (scs->static_config.encoder_bit_depth > EB_EIGHT_BIT);
+    bool is_16bit = (SVT_EFFECTIVE_BIT_DEPTH(scs->static_config.encoder_bit_depth) > EB_EIGHT_BIT);
 
     const uint32_t ss_x = scs->subsampling_x;
     const uint32_t ss_y = scs->subsampling_y;
@@ -1079,7 +1079,7 @@ void pad_ref_and_set_flags(PictureControlSet* pcs, SequenceControlSet* scs) {
         svt_aom_get_recon_pic(pcs, &ref_pic_ptr, 0);
         svt_aom_get_recon_pic(pcs, &ref_pic_16bit_ptr, 1);
     }
-    const bool     is_16bit     = (scs->static_config.encoder_bit_depth > EB_EIGHT_BIT);
+    const bool     is_16bit     = (SVT_EFFECTIVE_BIT_DEPTH(scs->static_config.encoder_bit_depth) > EB_EIGHT_BIT);
     const uint32_t color_format = ref_pic_ptr->color_format;
     const uint16_t ss_x         = (color_format == EB_YUV444 ? 0 : 1);
     const uint16_t ss_y         = (color_format >= EB_YUV422 ? 0 : 1);
@@ -1178,7 +1178,7 @@ void pad_ref_and_set_flags(PictureControlSet* pcs, SequenceControlSet* scs) {
             (ref_pic_16bit_ptr->width + ss_x + (ref_pic_ptr->border << 1)) >> ss_x,
             (ref_pic_16bit_ptr->height + ss_y + (ref_pic_ptr->border << 1)) >> ss_y);
     }
-    if ((scs->is_16bit_pipeline) && (!is_16bit)) {
+    if ((SVT_EFFECTIVE_IS_16BIT_PIPELINE(scs->is_16bit_pipeline)) && (!is_16bit)) {
         // Y samples
         svt_aom_generate_padding16_bit((uint16_t*)ref_pic_16bit_ptr->y_buffer,
                                        ref_pic_16bit_ptr->y_stride,
@@ -1262,7 +1262,7 @@ static void prepare_input_picture(SequenceControlSet* scs, PictureControlSet* pc
     uint32_t sb_width  = MIN(scs->sb_size, pcs->ppcs->aligned_width - sb_org_x);
     uint32_t sb_height = MIN(scs->sb_size, pcs->ppcs->aligned_height - sb_org_y);
 
-    if (is_16bit && scs->static_config.encoder_bit_depth > EB_EIGHT_BIT) {
+    if (is_16bit && SVT_EFFECTIVE_BIT_DEPTH(scs->static_config.encoder_bit_depth) > EB_EIGHT_BIT) {
         //SB128_TODO change 10bit SB creation
 
         const uint32_t input_luma_offset = (sb_org_y * input_pic->y_stride) + sb_org_x;
@@ -1326,20 +1326,20 @@ static void prepare_input_picture(SequenceControlSet* scs, PictureControlSet* pc
                                         (scs->sb_size - sb_width) >> 1,
                                         (scs->sb_size - sb_height) >> 1);
 
-        if (ctx->md_ctx->hbd_md == 0) {
+        if (SVT_EFFECTIVE_HBD_MD(ctx->md_ctx->hbd_md) == 0) {
             svt_aom_store16bit_input_src(
                 ctx->input_sample16bit_buffer, pcs, sb_org_x, sb_org_y, scs->sb_size, scs->sb_size);
         }
     }
 
-    if (is_16bit && scs->static_config.encoder_bit_depth == EB_EIGHT_BIT) {
+    if (is_16bit && SVT_EFFECTIVE_BIT_DEPTH(scs->static_config.encoder_bit_depth) == EB_EIGHT_BIT) {
         const uint32_t input_luma_offset = ((sb_org_y)*input_pic->y_stride) + (sb_org_x);
         const uint32_t input_cb_offset   = (((sb_org_y) >> 1) * input_pic->u_stride) + ((sb_org_x) >> 1);
         const uint32_t input_cr_offset   = (((sb_org_y) >> 1) * input_pic->v_stride) + ((sb_org_x) >> 1);
 
         sb_width  = ((sb_width < MIN_SB_SIZE) || ((sb_width > MIN_SB_SIZE) && (sb_width < MAX_SB_SIZE)))
-             ? MIN(scs->sb_size, (pcs->ppcs->aligned_width + scs->border) - sb_org_x)
-             : sb_width;
+            ? MIN(scs->sb_size, (pcs->ppcs->aligned_width + scs->border) - sb_org_x)
+            : sb_width;
         sb_height = ((sb_height < MIN_SB_SIZE) || ((sb_height > MIN_SB_SIZE) && (sb_height < MAX_SB_SIZE)))
             ? MIN(scs->sb_size, (pcs->ppcs->aligned_height + scs->border) - sb_org_y)
             : sb_height;
@@ -1412,10 +1412,10 @@ static void set_blocks_to_test(PictureControlSet* pcs, ModeDecisionContext* ctx,
     const bool inj_hv_incomp = (!has_cols || !has_rows);
     uint8_t    shapes_idx    = 0;
     const Part max_part      = (!ctx->nsq_geom_ctrls.enabled || (sq_size <= ctx->nsq_geom_ctrls.min_nsq_block_size) ||
-                           sq_size == 4 || (ctx->md_disallow_nsq_search && !inj_hv_incomp))
-             ? PART_N
-             : (sq_size == 8 || inj_hv_incomp) ? PART_V
-                                               : PART_S - 1;
+                                sq_size == 4 || (ctx->md_disallow_nsq_search && !inj_hv_incomp))
+        ? PART_N
+        : (sq_size == 8 || inj_hv_incomp) ? PART_V
+                                          : PART_S - 1;
     for (Part part = PART_N; part <= max_part; part++) {
         if (inj_hv_incomp) {
             if ((has_cols && part != PART_H) || (has_rows && part != PART_V)) {
@@ -1541,7 +1541,8 @@ static void update_pred_th_offset(PictureControlSet* pcs, ModeDecisionContext* c
     const int sq_size = bwidth;
 
     if (ctx->depth_refinement_ctrls.cost_band_based_modulation) {
-        uint32_t full_lambda = ctx->hbd_md ? ctx->full_lambda_md[EB_10_BIT_MD] : ctx->full_lambda_md[EB_8_BIT_MD];
+        uint32_t full_lambda = SVT_EFFECTIVE_HBD_MD(ctx->hbd_md) ? ctx->full_lambda_md[EB_10_BIT_MD]
+                                                                 : ctx->full_lambda_md[EB_8_BIT_MD];
 
         // cost-band-based modulation
         uint64_t max_cost = RDCOST(full_lambda, 16, ctx->depth_refinement_ctrls.max_cost_multiplier * bwidth * bheight);
@@ -1565,16 +1566,16 @@ static void update_pred_th_offset(PictureControlSet* pcs, ModeDecisionContext* c
         const uint32_t lower_depth_split_cost_th = ctx->depth_refinement_ctrls.lower_depth_split_cost_th;
         // Skip testing NSQ shapes at parent depth if the rate cost of splitting is very low
         if (lower_depth_split_cost_th && pc_tree->parent->tested_blk[PART_N][0]) {
-            const uint32_t full_lambda = ctx->hbd_md ? ctx->full_sb_lambda_md[EB_10_BIT_MD]
-                                                     : ctx->full_sb_lambda_md[EB_8_BIT_MD];
+            const uint32_t full_lambda = SVT_EFFECTIVE_HBD_MD(ctx->hbd_md) ? ctx->full_sb_lambda_md[EB_10_BIT_MD]
+                                                                           : ctx->full_sb_lambda_md[EB_8_BIT_MD];
             const uint64_t split_rate  = svt_aom_partition_rate_cost(pcs->ppcs,
-                                                                    pc_tree->parent->bsize,
-                                                                    pc_tree->parent->mi_row,
-                                                                    pc_tree->parent->mi_col,
-                                                                    ctx->md_rate_est_ctx,
-                                                                    PARTITION_SPLIT,
-                                                                    0,
-                                                                    0);
+                                                                     pc_tree->parent->bsize,
+                                                                     pc_tree->parent->mi_row,
+                                                                     pc_tree->parent->mi_col,
+                                                                     ctx->md_rate_est_ctx,
+                                                                     PARTITION_SPLIT,
+                                                                     0,
+                                                                     0);
             const uint64_t split_cost  = RDCOST(full_lambda, split_rate, 0);
             if (split_cost * 10000 < pc_tree->parent->block_data[PART_N][0]->cost * lower_depth_split_cost_th) {
                 *s_depth = 0;
@@ -1586,16 +1587,16 @@ static void update_pred_th_offset(PictureControlSet* pcs, ModeDecisionContext* c
     // Skip testing child depth if the rate cost of splitting is high
     if (split_cost_th && pc_tree->tested_blk[PART_N][0]) {
         split_cost_th += 20;
-        const uint32_t full_lambda = ctx->hbd_md ? ctx->full_sb_lambda_md[EB_10_BIT_MD]
-                                                 : ctx->full_sb_lambda_md[EB_8_BIT_MD];
+        const uint32_t full_lambda = SVT_EFFECTIVE_HBD_MD(ctx->hbd_md) ? ctx->full_sb_lambda_md[EB_10_BIT_MD]
+                                                                       : ctx->full_sb_lambda_md[EB_8_BIT_MD];
         const uint64_t split_rate  = svt_aom_partition_rate_cost(pcs->ppcs,
-                                                                pc_tree->bsize,
-                                                                pc_tree->mi_row,
-                                                                pc_tree->mi_col,
-                                                                ctx->md_rate_est_ctx,
-                                                                PARTITION_SPLIT,
-                                                                0, // partition ctxs not updated in PD0
-                                                                0);
+                                                                 pc_tree->bsize,
+                                                                 pc_tree->mi_row,
+                                                                 pc_tree->mi_col,
+                                                                 ctx->md_rate_est_ctx,
+                                                                 PARTITION_SPLIT,
+                                                                 0, // partition ctxs not updated in PD0
+                                                                 0);
         const uint64_t split_cost  = RDCOST(full_lambda, split_rate, 0);
 
         if (split_cost * 1000 > pc_tree->block_data[PART_N][0]->cost * split_cost_th) {
@@ -1660,7 +1661,8 @@ static void is_parent_to_current_deviation_small(PictureControlSet* pcs, ModeDec
 
         const int      bwidth      = block_size_wide[pc_tree->bsize];
         const int      bheight     = block_size_high[pc_tree->bsize];
-        const uint32_t full_lambda = ctx->hbd_md ? ctx->full_lambda_md[EB_10_BIT_MD] : ctx->full_lambda_md[EB_8_BIT_MD];
+        const uint32_t full_lambda = SVT_EFFECTIVE_HBD_MD(ctx->hbd_md) ? ctx->full_lambda_md[EB_10_BIT_MD]
+                                                                       : ctx->full_lambda_md[EB_8_BIT_MD];
 
         uint64_t max_cost = ctx->depth_refinement_ctrls.parent_max_cost_th_mult
             ? RDCOST(full_lambda,
@@ -1737,8 +1739,8 @@ static void is_child_to_current_deviation_small(PictureControlSet* pcs, ModeDeci
 
         int64_t child_to_current_deviation;
         child_cost                      = (child_cost / child_cnt) * 4;
-        const uint32_t full_lambda      = ctx->hbd_md ? ctx->full_sb_lambda_md[EB_10_BIT_MD]
-                                                      : ctx->full_sb_lambda_md[EB_8_BIT_MD];
+        const uint32_t full_lambda      = SVT_EFFECTIVE_HBD_MD(ctx->hbd_md) ? ctx->full_sb_lambda_md[EB_10_BIT_MD]
+                                                                            : ctx->full_sb_lambda_md[EB_8_BIT_MD];
         const uint64_t child_split_rate = svt_aom_partition_rate_cost(pcs->ppcs,
                                                                       pc_tree->bsize,
                                                                       pc_tree->mi_row,
@@ -2035,8 +2037,9 @@ static void recode_loop_decision_maker(PictureControlSet* pcs, SequenceControlSe
     if (*do_recode) {
         ppcs->loop_count++;
 
+        // Qindex 0 is lossless, which only md_config_process sets up: a recode keeps a lossy frame at qindex >= 1.
         frm_hdr->quantization_params.base_q_idx = (uint8_t)CLIP3(
-            (int32_t)quantizer_to_qindex[scs->static_config.min_qp_allowed],
+            AOMMAX((int32_t)quantizer_to_qindex[scs->static_config.min_qp_allowed], 1),
             (int32_t)quantizer_to_qindex[scs->static_config.max_qp_allowed],
             q);
 
@@ -2057,9 +2060,11 @@ static void recode_loop_decision_maker(PictureControlSet* pcs, SequenceControlSe
         }
 
         // 2pass QPM with tpl_la
-        if (scs->static_config.aq_mode == 2 && ppcs->tpl_ctrls.enable && ppcs->r0 != 0) {
+#if CONFIG_ENABLE_TPL
+        if (scs->static_config.aq_mode == 2 && ppcs->tpl_ctrls.enable && ppcs->r0_gen) {
             svt_aom_sb_qp_derivation_tpl_la(pcs);
         }
+#endif
 
         if (pcs->ppcs->frm_hdr.delta_q_params.delta_q_present && pcs->ppcs->frm_hdr.delta_q_params.delta_q_res != 1) {
             // adjust delta q res and normalize superblock delta q values to reduce signaling overhead
@@ -2077,11 +2082,12 @@ static void exaustive_light_pd1_features(ModeDecisionContext* md_ctx, PicturePar
         uint8_t light_pd1;
 
         // Use light-PD1 path if the assumed features are off
-        if (md_ctx->obmc_ctrls.enabled == 0 && md_ctx->md_allow_intrabc == 0 && md_ctx->hbd_md == 0 &&
-            md_ctx->ifs_ctrls.level == IFS_OFF && ppcs->frm_hdr.allow_warped_motion == 0 &&
-            md_ctx->inter_intra_comp_ctrls.enabled == 0 && md_ctx->rate_est_ctrls.update_skip_ctx_dc_sign_ctx == 0 &&
-            md_ctx->spatial_sse_ctrls.level == SSSE_OFF && md_ctx->md_sq_me_ctrls.enabled == 0 &&
-            md_ctx->md_pme_ctrls.enabled == 0 && md_ctx->txt_ctrls.enabled == 0 && md_ctx->unipred3x3_injection == 0 &&
+        if (md_ctx->obmc_ctrls.enabled == 0 && md_ctx->md_allow_intrabc == 0 &&
+            SVT_EFFECTIVE_HBD_MD(md_ctx->hbd_md) == 0 && md_ctx->ifs_ctrls.level == IFS_OFF &&
+            ppcs->frm_hdr.allow_warped_motion == 0 && md_ctx->inter_intra_comp_ctrls.enabled == 0 &&
+            md_ctx->rate_est_ctrls.update_skip_ctx_dc_sign_ctx == 0 && md_ctx->spatial_sse_ctrls.level == SSSE_OFF &&
+            md_ctx->md_sq_me_ctrls.enabled == 0 && md_ctx->md_pme_ctrls.enabled == 0 &&
+            md_ctx->txt_ctrls.enabled == 0 && md_ctx->unipred3x3_injection == 0 &&
             md_ctx->bipred3x3_ctrls.enabled == 0 && md_ctx->inter_comp_ctrls.tot_comp_types == 1 &&
             md_ctx->filter_intra_ctrls.enabled == 0 && md_ctx->new_nearest_near_comb_injection == 0 &&
             md_ctx->md_palette_level == 0 && ppcs->gm_ctrls.enabled == 0 &&
@@ -2798,7 +2804,12 @@ EbErrorType svt_aom_mode_decision_kernel_iter(void* context) {
                                              &pcs->md_frame_context);
             }
             if (!pcs->cdf_ctrl.update_coef) {
+#if CONFIG_ENABLE_FAST_DECODE_3
+                svt_aom_estimate_coefficients_rate(
+                    ed_ctx->md_ctx->rate_est_table, &pcs->md_frame_context, scs->dec_cost_ctrls.pos_rate);
+#else
                 svt_aom_estimate_coefficients_rate(ed_ctx->md_ctx->rate_est_table, &pcs->md_frame_context);
+#endif
             }
         }
         // Segment-loop
@@ -2812,7 +2823,7 @@ EbErrorType svt_aom_mode_decision_kernel_iter(void* context) {
             uint32_t segment_row_index  = segment_index / segments_ptr->segment_band_count;
             uint32_t segment_band_index = segment_index - segment_row_index * segments_ptr->segment_band_count;
             uint32_t segment_band_size  = (segments_ptr->sb_band_count * (segment_band_index + 1) +
-                                          segments_ptr->segment_band_count - 1) /
+                                           segments_ptr->segment_band_count - 1) /
                 segments_ptr->segment_band_count;
 
             // Reset Coding Loop State
@@ -2896,8 +2907,14 @@ EbErrorType svt_aom_mode_decision_kernel_iter(void* context) {
                         }
 
                         if (pcs->cdf_ctrl.update_coef) {
+#if CONFIG_ENABLE_FAST_DECODE_3
+                            svt_aom_estimate_coefficients_rate(ed_ctx->md_ctx->rate_est_table,
+                                                               &pcs->ec_ctx_array[sb_index],
+                                                               scs->dec_cost_ctrls.pos_rate);
+#else
                             svt_aom_estimate_coefficients_rate(ed_ctx->md_ctx->rate_est_table,
                                                                &pcs->ec_ctx_array[sb_index]);
+#endif
                         }
                         ed_ctx->md_ctx->md_rate_est_ctx = ed_ctx->md_ctx->rate_est_table;
                     }
@@ -2911,7 +2928,7 @@ EbErrorType svt_aom_mode_decision_kernel_iter(void* context) {
                     // signals set once per SB (i.e. not per PD)
                     svt_aom_sig_deriv_enc_dec_common(scs, pcs, ed_ctx->md_ctx);
 
-                    if (pcs->ppcs->palette_level) {
+                    if (SVT_EFFECTIVE_PALETTE(pcs->ppcs->palette_level)) {
                         rtime_alloc_palette_search_buffers(md_ctx);
                         // Status of palette info alloc
                         for (int i = 0; i < scs->max_block_cnt; ++i) {
@@ -2928,7 +2945,7 @@ EbErrorType svt_aom_mode_decision_kernel_iter(void* context) {
                     ed_ctx->md_ctx->is_subres_safe = (uint8_t)~0;
                     // Signal initialized here; if needed, will be set in md_encode_block before MDS3
                     md_ctx->need_hbd_comp_mds3 = 0;
-                    bool skip_pd_pass_0        = (ed_ctx->md_ctx->depth_removal_ctrls.disallow_below_64x64 &&
+                    bool skip_pd_pass_0 = (ed_ctx->md_ctx->depth_removal_ctrls.disallow_below_64x64 &&
                                            (scs->super_block_size == 64 || ed_ctx->md_ctx->max_block_size == 64)) ||
                         (ed_ctx->md_ctx->depth_removal_ctrls.disallow_below_32x32 &&
                          ed_ctx->md_ctx->max_block_size == 32);
@@ -2946,7 +2963,7 @@ EbErrorType svt_aom_mode_decision_kernel_iter(void* context) {
                         md_ctx->pred_depth_only = 1;
                     }
 
-                    const uint8_t saved_hbd_md = md_ctx->hbd_md;
+                    const uint8_t saved_hbd_md = SVT_EFFECTIVE_HBD_MD(md_ctx->hbd_md);
                     md_ctx->hbd_md             = 0;
                     // Multi-Pass PD
                     if (!skip_pd_pass_0 && pcs->ppcs->multi_pass_pd_level == MULTI_PASS_PD_ON) {
@@ -3015,20 +3032,20 @@ EbErrorType svt_aom_mode_decision_kernel_iter(void* context) {
                     }
 
                     // Can only use light-PD1 under the following conditions
-                    if (!(md_ctx->hbd_md == 0 && md_ctx->pred_depth_only && md_ctx->disallow_4x4 == true &&
-                          scs->super_block_size == 64)) {
+                    if (!(SVT_EFFECTIVE_HBD_MD(md_ctx->hbd_md) == 0 && md_ctx->pred_depth_only &&
+                          md_ctx->disallow_4x4 == true && scs->super_block_size == 64)) {
                         md_ctx->lpd1_ctrls.pd1_level = REGULAR_PD1;
                     }
                     exaustive_light_pd1_features(md_ctx, ppcs, md_ctx->lpd1_ctrls.pd1_level > REGULAR_PD1, 0);
                     if (md_ctx->lpd1_ctrls.pd1_level > REGULAR_PD1) {
-                        if (scs->static_config.rtc) {
+                        if (SVT_RTC_TUNE(scs)) {
                             svt_aom_sig_deriv_enc_dec_light_pd1_rtc(pcs, ed_ctx->md_ctx);
                         } else {
                             svt_aom_sig_deriv_enc_dec_light_pd1_default(pcs, ed_ctx->md_ctx);
                         }
-                    } else if (scs->allintra) {
+                    } else if (SVT_ALLINTRA(scs)) {
                         svt_aom_sig_deriv_enc_dec_allintra(pcs, ed_ctx->md_ctx);
-                    } else if (scs->static_config.rtc) {
+                    } else if (SVT_RTC_TUNE(scs)) {
                         svt_aom_sig_deriv_enc_dec_rtc(pcs, ed_ctx->md_ctx);
                     } else {
                         svt_aom_sig_deriv_enc_dec_default(pcs, ed_ctx->md_ctx);
@@ -3118,17 +3135,14 @@ EbErrorType svt_aom_mode_decision_kernel_iter(void* context) {
                         //Generate the loop filter parameters
                         if (sb_index == 0) {
                             svt_av1_loop_filter_init(pcs);
-                            svt_av1_pick_filter_level(
-                                (EbPictureBufferDesc*)pcs->ppcs->enhanced_pic, pcs, LPF_PICK_FROM_Q);
+                            svt_av1_pick_filter_level((EbPictureBufferDesc*)pcs->ppcs->enhanced_pic, pcs);
                             svt_av1_loop_filter_frame_init(&pcs->ppcs->frm_hdr, &pcs->ppcs->lf_info, 0, 3);
                         }
 
                         // Apply the loop filter
                         //Jing: Don't work for tile_parallel since the SB of bottom tile comes early than the bottom SB of top tile
 
-                        if ((pcs->ppcs->cdef_search_ctrls.enabled && !pcs->ppcs->cdef_search_ctrls.use_qp_strength &&
-                             !pcs->ppcs->cdef_search_ctrls.use_reference_cdef_fs) ||
-                            pcs->ppcs->enable_restoration || pcs->ppcs->is_ref || scs->static_config.recon_enabled) {
+                        if (svt_av1_lf_recon_needed(pcs)) {
                             if (pcs->ppcs->frm_hdr.loop_filter_params.filter_level[0] ||
                                 pcs->ppcs->frm_hdr.loop_filter_params.filter_level[1]) {
                                 EbPictureBufferDesc* recon_buffer;
@@ -3188,8 +3202,8 @@ EbErrorType svt_aom_mode_decision_kernel_iter(void* context) {
                 for (uint16_t tile_group_idx = 0; tile_group_idx < tg_count; tile_group_idx++) {
                     svt_get_empty_object(ed_ctx->enc_dec_feedback_fifo_ptr, &enc_dec_re_encode_tasks_wrapper);
 
-                    EncDecTasks* enc_dec_re_encode_tasks_ptr = (EncDecTasks*)
-                                                                   enc_dec_re_encode_tasks_wrapper->object_ptr;
+                    EncDecTasks* enc_dec_re_encode_tasks_ptr      = (EncDecTasks*)
+                                                                        enc_dec_re_encode_tasks_wrapper->object_ptr;
                     enc_dec_re_encode_tasks_ptr->pcs_wrapper      = enc_dec_tasks->pcs_wrapper;
                     enc_dec_re_encode_tasks_ptr->input_type       = ENCDEC_TASKS_MDC_INPUT;
                     enc_dec_re_encode_tasks_ptr->tile_group_index = tile_group_idx;
@@ -3218,15 +3232,15 @@ EbErrorType svt_aom_mode_decision_kernel_iter(void* context) {
                             pcs->ppcs->global_motion[frame];
                     }
                 }
-                svt_memcpy(pcs->ppcs->av1x->sgrproj_restore_cost,
-                           pcs->md_rate_est_ctx->sgrproj_restore_fac_bits,
-                           2 * sizeof(int32_t));
-                svt_memcpy(pcs->ppcs->av1x->switchable_restore_cost,
-                           pcs->md_rate_est_ctx->switchable_restore_fac_bits,
-                           3 * sizeof(int32_t));
-                svt_memcpy(pcs->ppcs->av1x->wiener_restore_cost,
-                           pcs->md_rate_est_ctx->wiener_restore_fac_bits,
-                           2 * sizeof(int32_t));
+                memcpy(pcs->ppcs->av1x->sgrproj_restore_cost,
+                       pcs->md_rate_est_ctx->sgrproj_restore_fac_bits,
+                       2 * sizeof(int32_t));
+                memcpy(pcs->ppcs->av1x->switchable_restore_cost,
+                       pcs->md_rate_est_ctx->switchable_restore_fac_bits,
+                       3 * sizeof(int32_t));
+                memcpy(pcs->ppcs->av1x->wiener_restore_cost,
+                       pcs->md_rate_est_ctx->wiener_restore_fac_bits,
+                       2 * sizeof(int32_t));
                 pcs->ppcs->av1x->rdmult =
                     ed_ctx->pic_full_lambda[(ed_ctx->bit_depth == EB_TEN_BIT) ? EB_10_BIT_MD : EB_8_BIT_MD];
                 if (pcs->ppcs->superres_total_recode_loop == 0) {

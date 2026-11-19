@@ -70,7 +70,7 @@ static EbErrorType copy_recon_enc(SequenceControlSet* scs, EbPictureBufferDesc* 
 
     int      ss_x            = scs->subsampling_x;
     int      ss_y            = scs->subsampling_y;
-    uint32_t bytes_per_pixel = scs->is_16bit_pipeline ? 2 : 1;
+    uint32_t bytes_per_pixel = SVT_EFFECTIVE_IS_16BIT_PIPELINE(scs->is_16bit_pipeline) ? 2 : 1;
 
     // Get frame size to alloc
     uint32_t alloc_sz       = 0;
@@ -120,7 +120,7 @@ static EbErrorType copy_recon_enc(SequenceControlSet* scs, EbPictureBufferDesc* 
     }
     assert(assigned_space == alloc_sz);
 
-    int use_highbd = scs->is_16bit_pipeline;
+    int use_highbd = SVT_EFFECTIVE_IS_16BIT_PIPELINE(scs->is_16bit_pipeline);
 
     if (!skip_copy) {
         assert(num_planes <= MAX_PLANES);
@@ -153,7 +153,7 @@ static void svt_av1_superres_upscale_frame(struct Av1Common* cm, PictureControlS
     // Set these parameters for testing since they are not correctly populated yet
     EbPictureBufferDesc* recon_ptr;
 
-    bool is_16bit = scs->is_16bit_pipeline;
+    bool is_16bit = SVT_EFFECTIVE_IS_16BIT_PIPELINE(scs->is_16bit_pipeline);
 
     svt_aom_get_recon_pic(pcs, &recon_ptr, is_16bit);
 
@@ -211,11 +211,26 @@ static void svt_av1_superres_upscale_frame(struct Av1Common* cm, PictureControlS
 typedef struct CdefContext {
     EbFifo* cdef_input_fifo_ptr;
     EbFifo* cdef_output_fifo_ptr;
+    // Hoisted per-thread CDEF search scratch (were large on-stack arrays).
+    uint16_t* tmp_dst; // 1 << (MAX_SB_SIZE_LOG2 * 2)
+#if !CDEF_8BITS_PATH || CONFIG_ENABLE_HIGH_BIT_DEPTH
+    uint16_t* inbuf; // CDEF_INBUF_SIZE (16-bit sentinel buffer)
+#endif
+#if CDEF_8BITS_PATH
+    uint8_t* inbuf8; // CDEF_INBUF_SIZE (8-bit native interior path)
+#endif
 } CdefContext;
 
 static void cdef_context_dctor(EbPtr p) {
     EbThreadContext* thread_ctx = (EbThreadContext*)p;
     CdefContext*     obj        = (CdefContext*)thread_ctx->priv;
+    EB_FREE_ALIGNED_ARRAY(obj->tmp_dst);
+#if !CDEF_8BITS_PATH || CONFIG_ENABLE_HIGH_BIT_DEPTH
+    EB_FREE_ALIGNED_ARRAY(obj->inbuf);
+#endif
+#if CDEF_8BITS_PATH
+    EB_FREE_ALIGNED_ARRAY(obj->inbuf8);
+#endif
     EB_FREE_ARRAY(obj);
 }
 
@@ -230,9 +245,18 @@ EbErrorType svt_aom_cdef_context_ctor(EbThreadContext* thread_ctx, const EbEncHa
 
     // Input/Output System Resource Manager FIFOs
     cdef_ctx->cdef_input_fifo_ptr  = svt_system_resource_get_consumer_fifo(enc_handle_ptr->dlf_results_resource_ptr,
-                                                                          index);
+                                                                           index);
     cdef_ctx->cdef_output_fifo_ptr = svt_system_resource_get_producer_fifo(enc_handle_ptr->cdef_results_resource_ptr,
                                                                            index);
+
+    // Hoisted per-thread CDEF search scratch (previously large on-stack arrays).
+    EB_MALLOC_ALIGNED_ARRAY(cdef_ctx->tmp_dst, 1 << (MAX_SB_SIZE_LOG2 * 2));
+#if !CDEF_8BITS_PATH || CONFIG_ENABLE_HIGH_BIT_DEPTH
+    EB_MALLOC_ALIGNED_ARRAY(cdef_ctx->inbuf, CDEF_INBUF_SIZE);
+#endif
+#if CDEF_8BITS_PATH
+    EB_MALLOC_ALIGNED_ARRAY(cdef_ctx->inbuf8, CDEF_INBUF_SIZE);
+#endif
 
     return EB_ErrorNone;
 }
@@ -265,7 +289,7 @@ static uint64_t compute_cdef_dist(const EbByte dst, int32_t doffset, int32_t dst
  * For each 64x64 filter block and each plane, search the allowable filter strength pairs.
  * Call cdef_filter_fb() to perform filtering, then compute the MSE for each pair.
 */
-static void cdef_seg_search(PictureControlSet* pcs, SequenceControlSet* scs, uint32_t segment_index) {
+static void cdef_seg_search(CdefContext* ctx, PictureControlSet* pcs, SequenceControlSet* scs, uint32_t segment_index) {
     PictureParentControlSet* ppcs    = pcs->ppcs;
     FrameHeader*             frm_hdr = &ppcs->frm_hdr;
     Av1Common*               cm      = ppcs->av1_cm;
@@ -304,28 +328,28 @@ static void cdef_seg_search(PictureControlSet* pcs, SequenceControlSet* scs, uin
     CdefList*           dlist;
 
 #if CONFIG_ENABLE_HIGH_BIT_DEPTH
-    const bool is_16bit = scs->is_16bit_pipeline;
+    const bool is_16bit = SVT_EFFECTIVE_IS_16BIT_PIPELINE(scs->is_16bit_pipeline);
 #else
     const bool is_16bit = false;
 #endif
 
 #if !CDEF_8BITS_PATH || CONFIG_ENABLE_HIGH_BIT_DEPTH
-    int32_t toff_prev  = CDEF_VBORDER;
-    int32_t loff_prev  = CDEF_HBORDER;
-    int32_t ysize_prev = (1 << MAX_SB_SIZE_LOG2) + 2 * CDEF_VBORDER;
-    int32_t xsize_prev = (1 << MAX_SB_SIZE_LOG2) + 2 * CDEF_HBORDER;
-    DECLARE_ALIGNED(32, uint16_t, inbuf[CDEF_INBUF_SIZE]); // 16-bit sentinel buffer (HBD / non-8bit path only)
-    uint16_t* in = inbuf + CDEF_VBORDER * CDEF_BSTRIDE + CDEF_HBORDER;
+    int32_t   toff_prev  = CDEF_VBORDER;
+    int32_t   loff_prev  = CDEF_HBORDER;
+    int32_t   ysize_prev = (1 << MAX_SB_SIZE_LOG2) + 2 * CDEF_VBORDER;
+    int32_t   xsize_prev = (1 << MAX_SB_SIZE_LOG2) + 2 * CDEF_HBORDER;
+    uint16_t* inbuf      = ctx->inbuf; // 16-bit sentinel buffer (HBD / non-8bit path only)
+    uint16_t* in         = inbuf + CDEF_VBORDER * CDEF_BSTRIDE + CDEF_HBORDER;
 #endif
 #if CDEF_8BITS_PATH
     // 8-bit padded buffer for the native interior path (replaces the 8->16 widen
     // for fully-interior 8-bit fbs). Same CDEF_BSTRIDE layout as `in`.
-    DECLARE_ALIGNED(32, uint8_t, inbuf8[CDEF_INBUF_SIZE]);
-    uint8_t* in8 = inbuf8 + CDEF_VBORDER * CDEF_BSTRIDE + CDEF_HBORDER;
+    uint8_t* inbuf8 = ctx->inbuf8;
+    uint8_t* in8    = inbuf8 + CDEF_VBORDER * CDEF_BSTRIDE + CDEF_HBORDER;
 #endif
     // tmp_dst is uint16_t to accommodate high bit depth content; 8bit will treat it as a uint8_t
     // buffer and will not use half of the buffer
-    DECLARE_ALIGNED(32, uint16_t, tmp_dst[1 << (MAX_SB_SIZE_LOG2 * 2)]);
+    uint16_t* tmp_dst = ctx->tmp_dst;
 
     EbPictureBufferDesc* input_pic = is_16bit ? pcs->input_frame16bit : ppcs->enhanced_pic;
     EbPictureBufferDesc* recon_pic;
@@ -399,8 +423,10 @@ static void cdef_seg_search(PictureControlSet* pcs, SequenceControlSet* scs, uin
             uint8_t (*dir)[CDEF_NBLOCKS][CDEF_NBLOCKS] = &pcs->cdef_dir_data[fb_idx].dir;
             int32_t (*var)[CDEF_NBLOCKS][CDEF_NBLOCKS] = &pcs->cdef_dir_data[fb_idx].var;
             for (int pli = 0; pli < num_planes; pli++) {
+#if !CDEF_8BITS_PATH || CONFIG_ENABLE_HIGH_BIT_DEPTH
                 int32_t ysize = (nvb << mi_high_l2[pli]) + boff + toff;
                 int32_t xsize = (nhb << mi_wide_l2[pli]) + roff + loff;
+#endif
 #if CDEF_8BITS_PATH
                 // 8-bit content (RTC): filter via the boundary-aware hybrid. Build the 8-bit in8
                 // buffer DIRECTLY from recon (interior AND frame-edge fbs); off-frame halo is left
@@ -416,8 +442,8 @@ static void cdef_seg_search(PictureControlSet* pcs, SequenceControlSet* scs, uin
                    but it would add special cases for any future vectorization.
                    Avoid memset'ting when dirty rect is inside the new one.
                    TODO: this could be further optimized - fill out only borders, separate buffers for Y & UV */
-                    bool need_to_reset = toff_prev > toff || loff_prev > loff || ysize < ysize_prev ||
-                        xsize < xsize_prev;
+                    bool need_to_reset = toff_prev > toff || loff_prev > loff ||
+                        ysize - toff < ysize_prev - toff_prev || xsize - loff < xsize_prev - loff_prev;
                     if (need_to_reset) {
                         uint16_t* p = &in[(-toff_prev * CDEF_BSTRIDE - loff_prev)];
                         for (int r = 0; r < ysize_prev; r++) {
@@ -665,13 +691,13 @@ EbErrorType svt_aom_cdef_kernel_iter(void* context) {
     PictureParentControlSet* ppcs = pcs->ppcs;
     scs                           = pcs->scs;
 
-    bool       is_16bit                   = scs->is_16bit_pipeline;
+    bool       is_16bit                   = SVT_EFFECTIVE_IS_16BIT_PIPELINE(scs->is_16bit_pipeline);
     Av1Common* cm                         = pcs->ppcs->av1_cm;
     frm_hdr                               = &pcs->ppcs->frm_hdr;
     CdefSearchControls* cdef_search_ctrls = &pcs->ppcs->cdef_search_ctrls;
-    if (!cdef_search_ctrls->use_reference_cdef_fs && !cdef_search_ctrls->use_qp_strength) {
+    if (!cdef_search_ctrls->use_reference_cdef_fs && cdef_search_ctrls->qp_strength_level != CDEF_QP_STRENGTH_YUV) {
         if (scs->seq_header.cdef_level && pcs->ppcs->cdef_level) {
-            cdef_seg_search(pcs, scs, dlf_results->segment_index);
+            cdef_seg_search(context_ptr, pcs, scs, dlf_results->segment_index);
         }
     }
     //all seg based search is done. update total processed segments. if all done, finish the search and perfrom application.
@@ -682,7 +708,8 @@ EbErrorType svt_aom_cdef_kernel_iter(void* context) {
         pcs->cdef_dist_dev = -1;
         if (scs->seq_header.cdef_level && pcs->ppcs->cdef_level) {
             finish_cdef_search(pcs);
-            if (ppcs->enable_restoration || pcs->ppcs->is_ref || scs->static_config.recon_enabled) {
+            if (ppcs->enable_restoration || pcs->ppcs->is_ref || scs->static_config.recon_enabled ||
+                scs->static_config.stat_report) {
                 // Do application iff there are non-zero filters
                 if (frm_hdr->cdef_params.cdef_y_strength[0] != 0 || frm_hdr->cdef_params.cdef_uv_strength[0] != 0 ||
                     pcs->ppcs->nb_cdef_strengths != 1) {
@@ -702,7 +729,7 @@ EbErrorType svt_aom_cdef_kernel_iter(void* context) {
         }
 
         //restoration prep
-        bool is_lr = ppcs->enable_restoration && frm_hdr->allow_intrabc == 0;
+        bool is_lr = SVT_EFFECTIVE_RESTORATION(ppcs->enable_restoration) && frm_hdr->allow_intrabc == 0;
         if (is_lr) {
             svt_av1_loop_restoration_save_boundary_lines(cm->frame_to_show, cm, 1);
             if (is_16bit) {

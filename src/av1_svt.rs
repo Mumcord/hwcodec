@@ -5,7 +5,6 @@ use std::sync::{Mutex, Once, PoisonError};
 use crate::codec::{Codec, VideoEncoder};
 use crate::{
     AV1_TEMPORAL_LAYERS, Av1Options, EncodedFrame, EncoderConfig, Error, I420Frame, Result,
-    av1_cpu_supported,
 };
 
 mod ffi {
@@ -105,12 +104,6 @@ unsafe impl Send for Av1Encoder {}
 impl Av1Encoder {
     /// Opens an encoder for `config` with the software-AV1 `options`.
     pub fn new(config: EncoderConfig, options: Av1Options) -> Result<Self> {
-        if !av1_cpu_supported() {
-            return Err(codec_error(
-                "encoder init",
-                "the CPU has no AVX2, and SVT-AV1's code for such CPUs crashes".to_owned(),
-            ));
-        }
         validate(&config)?;
         let handle = open(&config, options)?;
         Ok(Self {
@@ -550,9 +543,6 @@ mod tests {
 
     #[test]
     fn produces_the_default_and_the_requested_layers() {
-        if !av1_cpu_supported() {
-            return;
-        }
         let mut encoder = Av1Encoder::new(config(), Av1Options::default()).expect("encoder");
         assert_eq!(encoder.temporal_layers(), AV1_TEMPORAL_LAYERS);
         assert_eq!(layers_of(&mut encoder, 5), [0, 2, 1, 2, 0]);
@@ -576,9 +566,6 @@ mod tests {
 
     #[test]
     fn rejects_a_thread_count_when_opened() {
-        if !av1_cpu_supported() {
-            return;
-        }
         assert!(matches!(
             Av1Encoder::new(config().with_threads(2), Av1Options::default()),
             Err(Error::InvalidConfig(_))

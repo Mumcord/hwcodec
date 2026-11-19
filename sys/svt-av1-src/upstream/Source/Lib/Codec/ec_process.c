@@ -39,7 +39,8 @@ EbErrorType svt_aom_entropy_coding_context_ctor(EbThreadContext* thread_ctx, con
     thread_ctx->priv  = context_ptr;
     thread_ctx->dctor = rest_context_dctor;
 
-    context_ptr->is_16bit = enc_handle_ptr->scs_instance->scs->static_config.encoder_bit_depth > EB_EIGHT_BIT;
+    context_ptr->is_16bit = SVT_EFFECTIVE_BIT_DEPTH(
+                                enc_handle_ptr->scs_instance->scs->static_config.encoder_bit_depth) > EB_EIGHT_BIT;
 
     // Zero levels_buf once; the tail (offset >= LEVELS_TAIL_OFFSET) serves as
     // bottom padding for all block sizes via offset-based placement in set_levels.
@@ -72,7 +73,7 @@ static void entropy_coding_reset_neighbor_arrays(PictureControlSet* pcs, uint16_
 static void reset_entropy_coding_picture(EntropyCodingContext* ctx, PictureControlSet* pcs, SequenceControlSet* scs) {
     PictureParentControlSet* ppcs     = pcs->ppcs;
     const uint16_t           tile_cnt = ppcs->av1_cm->tiles_info.tile_rows * ppcs->av1_cm->tiles_info.tile_cols;
-    ctx->is_16bit                     = scs->static_config.encoder_bit_depth > EB_EIGHT_BIT;
+    ctx->is_16bit                     = SVT_EFFECTIVE_BIT_DEPTH(scs->static_config.encoder_bit_depth) > EB_EIGHT_BIT;
     const FrameHeader* frm_hdr        = &ppcs->frm_hdr;
     // Asuming cb and cr offset to be the same for chroma QP in both slice and pps for lambda computation
     const uint32_t entropy_coding_qp = frm_hdr->quantization_params.base_q_idx;
@@ -188,7 +189,7 @@ EbErrorType svt_aom_entropy_coding_kernel_iter(void* context) {
         for (uint32_t y_sb_index = 0; y_sb_index < tile_height_in_sb; ++y_sb_index) {
             for (uint32_t x_sb_index = 0; x_sb_index < tile_width_in_sb; ++x_sb_index) {
                 uint16_t    sb_index = (uint16_t)((x_sb_index + tile_sb_start_x) +
-                                               (y_sb_index + tile_sb_start_y) * pic_width_in_sb);
+                                                  (y_sb_index + tile_sb_start_y) * pic_width_in_sb);
                 SuperBlock* sb_ptr   = pcs->sb_ptr_array[sb_index];
 
                 const uint32_t sb_origin_x = (x_sb_index + tile_sb_start_x) << sb_size_log2;
@@ -226,7 +227,7 @@ EbErrorType svt_aom_entropy_coding_kernel_iter(void* context) {
 
     svt_block_on_mutex(pcs->entropy_coding_pic_mutex);
     // Flush locally-accumulated qindex stats (avoids per-block mutex)
-    pcs->ppcs->tot_qindex += context_ptr->tot_qindex;
+    pcs->ppcs->tot_qindex += (uint32_t)context_ptr->tot_qindex;
     pcs->ppcs->valid_qindex_area += context_ptr->valid_area;
     pcs->ec_info[tile_idx]->entropy_coding_tile_done = true;
     for (uint16_t i = 0; i < tile_cnt; i++) {
@@ -263,7 +264,7 @@ EbErrorType svt_aom_entropy_coding_kernel_iter(void* context) {
         svt_get_empty_object(context_ptr->entropy_coding_output_fifo_ptr, &entropy_coding_results_wrapper_ptr);
         EntropyCodingResults* entropy_coding_results_ptr = (EntropyCodingResults*)
                                                                entropy_coding_results_wrapper_ptr->object_ptr;
-        entropy_coding_results_ptr->pcs_wrapper = rest_results->pcs_wrapper;
+        entropy_coding_results_ptr->pcs_wrapper          = rest_results->pcs_wrapper;
 
         // Post EntropyCoding Results
         svt_post_full_object(entropy_coding_results_wrapper_ptr);

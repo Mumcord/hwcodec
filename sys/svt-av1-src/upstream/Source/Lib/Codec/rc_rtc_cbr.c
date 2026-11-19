@@ -159,7 +159,7 @@ static int av1_estimate_frame_size(PictureControlSet* pcs, int qindex, double rc
 
     // scale to resolution
     FrameSize* frm_size = &pcs->ppcs->av1_cm->frm_size;
-    return AOMMAX(estimated_size * frm_size->frame_width * frm_size->frame_height / 512, 1);
+    return (int)AOMMAX(estimated_size * frm_size->frame_width * frm_size->frame_height / 512, 1);
 }
 
 typedef struct {
@@ -246,7 +246,7 @@ static int calc_pframe_target_size(PictureParentControlSet* ppcs) {
     }
 
     double frame_target = rc->avg_frame_bandwidth;
-    double buffer_diff  = rc->buffer_level - rc->optimal_buffer_level;
+    double buffer_diff  = (double)rc->buffer_level - rc->optimal_buffer_level;
     double one_pct_bits = 1.0 + rc->optimal_buffer_level / 100.0;
 
     // temporal dependency and mode decision modulation
@@ -265,8 +265,7 @@ static int calc_pframe_target_size(PictureParentControlSet* ppcs) {
         frame_target *= 1.0 + pct / 400;
     }
 
-    double min_frame_target = AOMMAX(rc->avg_frame_bandwidth >> 4, FRAME_OVERHEAD_BITS);
-    return AOMMAX(min_frame_target, frame_target);
+    return (int)frame_target;
 }
 
 // Select SBs for cyclic refresh by advancing the persisted cycling index (with wrapping).
@@ -400,14 +399,16 @@ static void rtc_set_rate_correction_factor(PictureParentControlSet* ppcs, double
     svt_release_mutex(rc->rc_mutex);
 }
 
-static double calculate_qindex(PictureControlSet* pcs, SequenceControlSet* scs) {
+static uint8_t calculate_qindex(PictureControlSet* pcs, SequenceControlSet* scs) {
     PictureParentControlSet* ppcs   = pcs->ppcs;
     RATE_CONTROL*            rc     = &scs->enc_ctx->rc;
     RateControlCfg*          rc_cfg = &scs->enc_ctx->rc_cfg;
 
     int min_qindex = rc->best_quality;
     int max_qindex = rc->worst_quality;
-    int max_size   = rc->max_frame_bandwidth;
+    int vbv_budget = (int)(rc->maximum_buffer_size - rc->buffer_level + rc->avg_frame_bandwidth);
+    int max_size   = AOMMIN(rc->max_frame_bandwidth, vbv_budget);
+    int min_size   = AOMMAX(rc->avg_frame_bandwidth >> 4, FRAME_OVERHEAD_BITS);
 
     if (frame_is_intra_only(ppcs)) {
         rc->frames_to_key = scs->static_config.intra_period_length + 1;
@@ -439,7 +440,7 @@ static double calculate_qindex(PictureControlSet* pcs, SequenceControlSet* scs) 
             max_size = AOMMIN(max_size, maxp);
         }
     }
-    ppcs->base_frame_target = AOMMIN(ppcs->base_frame_target, max_size);
+    ppcs->base_frame_target = AOMMAX(AOMMIN(ppcs->base_frame_target, max_size), min_size);
     ppcs->this_frame_target = ppcs->base_frame_target;
 
     rtc_cyclic_refresh_init(ppcs);
@@ -453,6 +454,64 @@ static double calculate_qindex(PictureControlSet* pcs, SequenceControlSet* scs) 
 
     int qindex = find_closest_arg(ppcs->this_frame_target, min_qindex, max_qindex, eval_frame_size, &ctx);
     return clamp_qindex(scs, qindex);
+}
+
+bool svt_av1_rc_try_reserve_frame_skip(SequenceControlSet* scs, bool protected_input) {
+    const uint8_t max_skips = scs->static_config.max_allowed_consecutive_frames_skips;
+    if (max_skips == 0) {
+        return false;
+    }
+
+    RATE_CONTROL* rc = &scs->enc_ctx->rc;
+    svt_block_on_mutex(rc->rc_mutex);
+
+    bool skip = false;
+    if (protected_input || rc->consecutive_frame_skips >= max_skips) {
+        rc->consecutive_frame_skips = 0;
+    } else if (rc->frame_skip_credits > 0) {
+        rc->frame_skip_credits--;
+        rc->frame_skip_reservations++;
+        rc->consecutive_frame_skips++;
+        skip = true;
+    } else {
+        rc->consecutive_frame_skips = 0;
+    }
+
+    svt_release_mutex(rc->rc_mutex);
+    return skip;
+}
+
+void svt_av1_rc_publish_frame_skip_credits(const SequenceControlSet* scs, RATE_CONTROL* rc) {
+    const uint8_t max_skips = scs->static_config.max_allowed_consecutive_frames_skips;
+
+    svt_block_on_mutex(rc->rc_mutex);
+    if (max_skips == 0 || rc->frame_skip_reservations > 0 || rc->avg_frame_bandwidth <= 0 ||
+        rc->buffer_level < rc->maximum_buffer_size) {
+        svt_release_mutex(rc->rc_mutex);
+        return;
+    }
+
+    const int64_t required = (rc->buffer_level - rc->maximum_buffer_size) / rc->avg_frame_bandwidth + 1;
+    const uint8_t credits  = (uint8_t)AOMMIN(required, max_skips);
+    rc->frame_skip_credits = AOMMAX(rc->frame_skip_credits, credits);
+    svt_release_mutex(rc->rc_mutex);
+}
+
+void svt_av1_rc_apply_frame_skip_drain(RATE_CONTROL* rc, int64_t* drain_bits, uint32_t* drain_count) {
+    const int64_t  bits  = *drain_bits;
+    const uint32_t count = *drain_count;
+    *drain_bits          = 0;
+    *drain_count         = 0;
+
+    if (bits <= 0 && count == 0) {
+        return;
+    }
+
+    svt_block_on_mutex(rc->rc_mutex);
+    rc->buffer_level = AOMMAX(0, rc->buffer_level - bits);
+    assert(rc->frame_skip_reservations >= count);
+    rc->frame_skip_reservations = rc->frame_skip_reservations >= count ? rc->frame_skip_reservations - count : 0;
+    svt_release_mutex(rc->rc_mutex);
 }
 
 void svt_av1_rc_calc_qindex_rtc_cbr(PictureControlSet* pcs) {
@@ -524,6 +583,9 @@ void svt_av1_rc_calc_qindex_rtc_cbr(PictureControlSet* pcs) {
             rc->max_frame_bandwidth = AOMMAX(rc->avg_frame_bandwidth, rc->max_frame_bandwidth);
         }
     }
+
+    RATE_CONTROL* rc = &scs->enc_ctx->rc;
+    svt_av1_rc_apply_frame_skip_drain(rc, &ppcs->frame_skip_drain_bits, &ppcs->frame_skip_count);
 
     // Dynamic resolution resize (parity with libaom RT, which runs the resize decision in
     // its realtime RC path): the dedicated RTC-CBR controller must run the same decision as
@@ -627,32 +689,39 @@ static void rtc_update_buffer_level(PictureParentControlSet* ppcs, int encoded_f
 // Post-encode VBV recode decision for RTC CBR.
 // After EncDec finishes, evaluates whether the frame would overflow the VBV buffer.
 bool svt_av1_rc_recode_decision_rtc_cbr(PictureControlSet* pcs) {
-    PictureParentControlSet* ppcs = pcs->ppcs;
-    RATE_CONTROL*            rc   = &ppcs->scs->enc_ctx->rc;
-
-    // Do not recode keyframes yet
-    if (frame_is_intra_only(ppcs)) {
-        return false;
-    }
+    PictureParentControlSet* ppcs   = pcs->ppcs;
+    RATE_CONTROL*            rc     = &ppcs->scs->enc_ctx->rc;
+    RateControlCfg*          rc_cfg = &ppcs->scs->enc_ctx->rc_cfg;
 
     // Prevent re-entry: only one recode pass
     if (ppcs->loop_count > 0) {
         return false;
     }
 
+    // Can't reduce frame size if already on worst quality
+    if (ppcs->frm_hdr.quantization_params.base_q_idx >= rc->worst_quality) {
+        return false;
+    }
+
     int projected_frame_size = (int)ROUND_POWER_OF_TWO(ppcs->pcs_total_rate, AV1_PROB_COST_SHIFT);
     projected_frame_size += (ppcs->frm_hdr.frame_type == KEY_FRAME) ? 13 : 0;
 
+    int64_t max_frame_size = INT64_MAX;
+    int     max_pct        = frame_is_intra_only(ppcs) ? rc_cfg->max_intra_bitrate_pct : rc_cfg->max_inter_bitrate_pct;
+    if (rc_cfg->mode == AOM_CBR && max_pct > 0) {
+        max_frame_size = (int64_t)rc->avg_frame_bandwidth * max_pct / 100;
+    }
+
     // Project VBV buffer after this frame
     int64_t projected_buffer = rc->buffer_level + projected_frame_size - rc->avg_frame_bandwidth;
-    if (projected_buffer <= rc->maximum_buffer_size) {
+    if (projected_buffer <= rc->maximum_buffer_size && projected_frame_size <= max_frame_size) {
         return false;
     }
 
     int new_q_idx = rc->worst_quality;
 
-    // Frame would overflow VBV. Compute target size that fits.
-    int target_size = (int)(rc->maximum_buffer_size - rc->buffer_level + rc->avg_frame_bandwidth);
+    // Frame would overflow the VBV and/or the frame cap. Compute target size that fits.
+    int target_size = (int)AOMMIN(max_frame_size, rc->maximum_buffer_size - rc->buffer_level + rc->avg_frame_bandwidth);
     if (target_size >= FRAME_OVERHEAD_BITS) {
         // Use R-Q model to find the qindex that produces target_size
         int    width  = ppcs->av1_cm->frm_size.frame_width;
@@ -691,6 +760,7 @@ void svt_av1_rc_postencode_update_rtc_cbr(PictureParentControlSet* ppcs) {
     rtc_update_rate_correction_factors(ppcs);
 
     rtc_update_buffer_level(ppcs, ppcs->projected_frame_size);
+    svt_av1_rc_publish_frame_skip_credits(ppcs->scs, rc);
 
     int qindex = frm_hdr->quantization_params.base_q_idx;
 

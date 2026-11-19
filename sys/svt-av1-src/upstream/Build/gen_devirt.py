@@ -18,8 +18,12 @@ so the setup TU keeps the indirect form and stays compilable.
 
 Usage:
   python3 Build/gen_devirt.py            # dry run: print counts + sample
-  python3 Build/gen_devirt.py --write    # write populated devirt headers
+  python3 Build/gen_devirt.py --write --outdir DIR   # write populated devirt headers into DIR (build tree)
   python3 Build/gen_devirt.py --empty    # write banner-only headers (devirt OFF)
+  python3 Build/gen_devirt.py --write --outdir DIR --skip-guard CONFIG_X   # CONFIG_X is also false
+      in the target build (repeatable; --skip-guard=CONFIG_X works too): no redirects for the SET_NEON
+      entries under an #if/#elif naming it (a redirect would keep their call sites linked to the _neon
+      symbols; unredirected they call the unset pointer, which is dead)
 """
 import os
 import re
@@ -32,7 +36,7 @@ SRC = os.path.normpath(os.path.join(SCRIPT_DIR, "..", "Source", "Lib", "Codec"))
 # SET_NEON entries inside them (dead in the RTC build, zero benefit, added risk).
 SKIP_GUARDS = {
     "CONFIG_ENABLE_HIGH_BIT_DEPTH", "CONFIG_ENABLE_OBMC", "CONFIG_ENABLE_FILM_GRAIN",
-    "CONFIG_ENABLE_QUANT_MATRIX", "OPT_TUNE_VMAF", "ARCH_X86_64", "EN_AVX512_SUPPORT",
+    "CONFIG_ENABLE_QUANT_MATRIX", "CONFIG_ENABLE_VMAF", "ARCH_X86_64", "EN_AVX512_SUPPORT",
 }
 
 # (output header basename, source .c, RTCD setup-TU guard symbol)
@@ -137,6 +141,19 @@ def main():
     write = "--write" in sys.argv
     empty = "--empty" in sys.argv
     populated = not empty
+    for i, arg in enumerate(sys.argv):
+        if arg == "--skip-guard" or arg.startswith("--skip-guard="):
+            guard = arg.partition("=")[2] if "=" in arg else (sys.argv[i + 1] if i + 1 < len(sys.argv) else "")
+            if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", guard):
+                print("ERROR: --skip-guard requires a macro name", file=sys.stderr)
+                sys.exit(1)
+            SKIP_GUARDS.add(guard)
+    # Output directory for the generated headers. Defaults to the source dir, but the PGO build scripts
+    # pass --outdir <build>/generated so the headers live only in the build tree (never committed).
+    outdir = SRC
+    if "--outdir" in sys.argv:
+        outdir = os.path.abspath(sys.argv[sys.argv.index("--outdir") + 1])
+        os.makedirs(outdir, exist_ok=True)
 
     aom_dispatch = parse_dispatch_names(os.path.join(SRC, "aom_dsp_rtcd.h"))
     com_dispatch = parse_dispatch_names(os.path.join(SRC, "common_dsp_rtcd.h"))
@@ -152,9 +169,9 @@ def main():
         if skipped:
             print("  skipped:", skipped[:20])
         if write or empty:
-            with open(os.path.join(SRC, out_name), "w") as fh:
+            with open(os.path.join(outdir, out_name), "w") as fh:
                 fh.write(text)
-            print(f"  WROTE {os.path.join(SRC, out_name)} "
+            print(f"  WROTE {os.path.join(outdir, out_name)} "
                   f"({'empty' if empty else 'populated'})")
     if write or empty:
         print(f"total devirtualized: {total}")

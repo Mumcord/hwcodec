@@ -57,7 +57,7 @@ static void set_global_motion_field(PictureControlSet* pcs) {
     for (frame_index = INTRA_FRAME; frame_index <= ALTREF_FRAME; ++frame_index) {
         const uint8_t list_idx = get_list_idx(frame_index);
         const uint8_t ref_idx  = get_ref_frame_idx(frame_index);
-        if (!ppcs->is_global_motion[list_idx][ref_idx]) {
+        if (!SVT_EFFECTIVE_GM(ppcs->is_global_motion[list_idx][ref_idx])) {
             continue;
         }
         ppcs->global_motion[frame_index] = ppcs->global_motion_estimation[list_idx][ref_idx];
@@ -66,12 +66,16 @@ static void set_global_motion_field(PictureControlSet* pcs) {
         if (ppcs->global_motion[frame_index].wmtype == TRANSLATION) {
             // The offset to derive the translation is different when the wmtype is TRANSLATION. Therefore,
             // for translation convert the param to the correct offset.
-            ppcs->global_motion[frame_index].wmmat[0] =
-                convert_to_trans_prec(ppcs->frm_hdr.allow_high_precision_mv, ppcs->global_motion[frame_index].wmmat[0])
-                << GM_TRANS_ONLY_PREC_DIFF;
-            ppcs->global_motion[frame_index].wmmat[1] =
-                convert_to_trans_prec(ppcs->frm_hdr.allow_high_precision_mv, ppcs->global_motion[frame_index].wmmat[1])
-                << GM_TRANS_ONLY_PREC_DIFF;
+            // convert_to_trans_prec() can return a negative offset; use multiplication
+            // instead of a left shift to avoid UB (left shift of negative value).
+            ppcs->global_motion[frame_index].wmmat[0] = convert_to_trans_prec(
+                                                            ppcs->frm_hdr.allow_high_precision_mv,
+                                                            ppcs->global_motion[frame_index].wmmat[0]) *
+                (1 << GM_TRANS_ONLY_PREC_DIFF);
+            ppcs->global_motion[frame_index].wmmat[1] = convert_to_trans_prec(
+                                                            ppcs->frm_hdr.allow_high_precision_mv,
+                                                            ppcs->global_motion[frame_index].wmmat[1]) *
+                (1 << GM_TRANS_ONLY_PREC_DIFF);
 
             // For TRANSLATION type global motion models, svt_aom_gm_get_motion_vector_enc() gives
             // the wrong motion vector due to an AV1 spec bug.
@@ -251,6 +255,12 @@ static void svt_av1_qm_init(PictureParentControlSet* pcs) {
         const int32_t min_chroma_qmlevel = pcs->scs->static_config.min_chroma_qm_level;
         const int32_t max_chroma_qmlevel = pcs->scs->static_config.max_chroma_qm_level;
         const int32_t base_qindex        = pcs->frm_hdr.quantization_params.base_q_idx;
+        // Clip the chroma qindex to the valid range, as the spec does when deriving the quantizer,
+        // so that large chroma qindex offsets cannot map to an out-of-range QM level.
+        const int32_t qindex_u = CLIP3(
+            0, QINDEX_RANGE - 1, base_qindex + pcs->frm_hdr.quantization_params.delta_q_ac[PLANE_U]);
+        const int32_t qindex_v = CLIP3(
+            0, QINDEX_RANGE - 1, base_qindex + pcs->frm_hdr.quantization_params.delta_q_ac[PLANE_V]);
 
         switch (pcs->scs->static_config.tune) {
         case TUNE_IQ:
@@ -258,24 +268,16 @@ static void svt_av1_qm_init(PictureParentControlSet* pcs) {
             pcs->frm_hdr.quantization_params.qm[PLANE_Y] = svt_av1_still_get_qmlevel(
                 base_qindex, min_qmlevel, max_qmlevel);
             pcs->frm_hdr.quantization_params.qm[PLANE_U] = svt_av1_still_get_qmlevel(
-                base_qindex + pcs->frm_hdr.quantization_params.delta_q_ac[PLANE_U],
-                min_chroma_qmlevel,
-                max_chroma_qmlevel);
+                qindex_u, min_chroma_qmlevel, max_chroma_qmlevel);
             pcs->frm_hdr.quantization_params.qm[PLANE_V] = svt_av1_still_get_qmlevel(
-                base_qindex + pcs->frm_hdr.quantization_params.delta_q_ac[PLANE_V],
-                min_chroma_qmlevel,
-                max_chroma_qmlevel);
+                qindex_v, min_chroma_qmlevel, max_chroma_qmlevel);
             break;
         default:
             pcs->frm_hdr.quantization_params.qm[PLANE_Y] = aom_get_qmlevel(base_qindex, min_qmlevel, max_qmlevel);
             pcs->frm_hdr.quantization_params.qm[PLANE_U] = aom_get_qmlevel(
-                base_qindex + pcs->frm_hdr.quantization_params.delta_q_ac[PLANE_U],
-                min_chroma_qmlevel,
-                max_chroma_qmlevel);
+                qindex_u, min_chroma_qmlevel, max_chroma_qmlevel);
             pcs->frm_hdr.quantization_params.qm[PLANE_V] = aom_get_qmlevel(
-                base_qindex + pcs->frm_hdr.quantization_params.delta_q_ac[PLANE_V],
-                min_chroma_qmlevel,
-                max_chroma_qmlevel);
+                qindex_v, min_chroma_qmlevel, max_chroma_qmlevel);
             break;
         }
 #if DEBUG_QM_LEVEL
@@ -322,12 +324,24 @@ static void init_frame_rate_tables(PictureControlSet* pcs) {
     svt_aom_estimate_mv_rate(pcs, md_rate_est_ctx, &pcs->md_frame_context);
     // Initial Rate Estimation of the quantized coefficients
     if (pcs->rdoq_level || pcs->rate_est_level) {
+#if CONFIG_ENABLE_FAST_DECODE_3
+        svt_aom_estimate_coefficients_rate(md_rate_est_ctx, &pcs->md_frame_context, ppcs->scs->dec_cost_ctrls.pos_rate);
+#else
         svt_aom_estimate_coefficients_rate(md_rate_est_ctx, &pcs->md_frame_context);
+#endif
     }
 }
 
 // Perform initializations needed for MD
 void mdc_init_qp_update(PictureControlSet* pcs) {
+    FrameHeader* frm_hdr = &pcs->ppcs->frm_hdr;
+    // A lossless frame recoded at qindex > 0 is coded as a lossy frame.
+    // Restore QM use; the other tools disabled during lossless frame setup stay off.
+    if (frm_hdr->coded_lossless && frm_hdr->quantization_params.base_q_idx) {
+        memset(pcs->lossless, 0, sizeof(pcs->lossless));
+        frm_hdr->coded_lossless = frm_hdr->all_lossless = 0;
+        frm_hdr->quantization_params.using_qmatrix      = pcs->scs->static_config.enable_qm;
+    }
     pcs->intra_coded_area = 0;
     pcs->skip_coded_area  = 0;
     pcs->hp_coded_area    = 0;
@@ -581,7 +595,7 @@ static void av1_setup_motion_field(Av1Common* cm, PictureControlSet* pcs) {
 
 EbErrorType svt_av1_hash_table_create(HashTable* p_hash_table);
 int32_t     svt_aom_noise_log1p_fp16(int32_t noise_level_fp16);
-
+#if CONFIG_ENABLE_INTRA_BC || !MOBILE_BUILD
 static void generate_ibc_data(PictureControlSet* pcs) {
     const int pic_width  = pcs->ppcs->aligned_width;
     const int pic_height = pcs->ppcs->aligned_height;
@@ -615,7 +629,7 @@ static void generate_ibc_data(PictureControlSet* pcs) {
         EB_FREE_ARRAY(block_hash_values[j]);
     }
 }
-
+#endif
 static void derive_intra_coeff_level(PictureControlSet* pcs) {
     uint64_t cmplx = pcs->ppcs->pic_avg_variance / MAX(1, pcs->scs->static_config.qp);
 
@@ -712,8 +726,9 @@ static void update_cdef_filters_on_ref_info(PictureControlSet* pcs) {
             cdef_ctrls->pred_uv_f                  = 0;
             cdef_ctrls->first_pass_fs_num          = 0;
             cdef_ctrls->default_second_pass_fs_num = 0;
-            // Set cdef to off if pred is.
-            if ((cdef_ctrls->pred_y_f == 0) && (cdef_ctrls->pred_uv_f == 0)) {
+            // Keep CDEF enabled when QP strength will provide Y and/or UV after reference-Y reuse.
+            if ((cdef_ctrls->pred_y_f == 0) && (cdef_ctrls->pred_uv_f == 0) &&
+                cdef_ctrls->qp_strength_level == CDEF_QP_STRENGTH_OFF) {
                 pcs->ppcs->cdef_level = 0;
             }
         }
@@ -786,8 +801,8 @@ static bool me_based_cdef_skip(PictureControlSet* pcs) {
     const uint8_t in_res = pcs->ppcs->input_resolution;
     // For flat, mult should be based on update_type since all pics are temporal layer 0
     const int      mult = pcs->ppcs->hierarchical_levels ? (pcs->temporal_layer_index + 1)
-             : frame_is_boosted(pcs->ppcs)               ? 1
-             : frame_is_leaf(pcs->ppcs)                  ? 3
+        : frame_is_boosted(pcs->ppcs)                    ? 1
+        : frame_is_leaf(pcs->ppcs)                       ? 3
                                                          : 2;
     const uint32_t use_zero_strength_th =
         disable_cdef_th[pcs->ppcs->cdef_recon_ctrls.zero_filter_strength_lvl][in_res] * mult;
@@ -921,9 +936,9 @@ EbErrorType svt_aom_mode_decision_configuration_kernel_iter(void* context) {
 
     FrameHeader* frm_hdr = &pcs->ppcs->frm_hdr;
     // Mode Decision Configuration Kernel Signal(s) derivation
-    if (scs->allintra) {
+    if (SVT_ALLINTRA(scs)) {
         svt_aom_sig_deriv_mode_decision_config_allintra(scs, pcs);
-    } else if (scs->static_config.rtc) {
+    } else if (SVT_RTC_TUNE(scs)) {
         svt_aom_sig_deriv_mode_decision_config_rtc(scs, pcs);
     } else {
         svt_aom_sig_deriv_mode_decision_config_default(scs, pcs);
@@ -943,6 +958,7 @@ EbErrorType svt_aom_mode_decision_configuration_kernel_iter(void* context) {
     svt_av1_qm_init(pcs->ppcs);
     // Initialize the rate estimation tables for the frame
     init_frame_rate_tables(pcs);
+#if CONFIG_ENABLE_INTRA_BC || !MOBILE_BUILD
     if (frm_hdr->allow_intrabc) {
         IntrabcCtrls* intraBC_ctrls = &(pcs->ppcs->intrabc_ctrls);
         // Generate hash table for intra-Bc if max block size is set
@@ -968,6 +984,7 @@ EbErrorType svt_aom_mode_decision_configuration_kernel_iter(void* context) {
             }
         }
     }
+#endif
     CdefSearchControls* cdef_ctrls = &pcs->ppcs->cdef_search_ctrls;
     const uint8_t       skip_perc  = pcs->ref_skip_percentage;
     // Adjust skip_th by QP: at low QP lower the threshold (skip CDEF more — picture already clean),
@@ -1019,7 +1036,18 @@ EbErrorType svt_aom_mode_decision_configuration_kernel_iter(void* context) {
     // Derive all_lossless; if super-resolution is used, such a frame will still NOT be lossless at the upscaled resolution.
     frm_hdr->all_lossless = frm_hdr->coded_lossless && av1_superres_unscaled(&(pcs->ppcs->av1_cm->frm_size));
 
+#if !CONFIG_ENABLE_LOSSLESS
+    // Lossless coding is not supported in this build configuration.
+    for (int segment_id = 0; segment_id < MAX_SEGMENTS; segment_id++) {
+        pcs->lossless[segment_id] = 0;
+    }
+    frm_hdr->coded_lossless = 0;
+    frm_hdr->all_lossless   = 0;
+#endif
+
     if (frm_hdr->coded_lossless) {
+        // Lossless segments use a flat matrix regardless of the configured QM levels.
+        frm_hdr->quantization_params.using_qmatrix        = 0;
         pcs->ppcs->frm_hdr.delta_q_params.delta_q_present = 0;
         frm_hdr->quantization_params.delta_q_dc[PLANE_Y]  = 0;
         frm_hdr->quantization_params.delta_q_ac[PLANE_U]  = 0;
@@ -1043,7 +1071,9 @@ EbErrorType svt_aom_mode_decision_configuration_kernel_iter(void* context) {
         pcs->pic_block_based_depth_refinement_level = 0;
         pcs->pic_pd0_lvl                            = 0;
         pcs->pic_lpd1_lvl                           = 0;
-        pcs->pic_bypass_encdec = scs->static_config.encoder_bit_depth != EB_EIGHT_BIT ? 0 : pcs->pic_bypass_encdec;
+        pcs->pic_bypass_encdec = SVT_EFFECTIVE_BIT_DEPTH(scs->static_config.encoder_bit_depth) != EB_EIGHT_BIT
+            ? 0
+            : pcs->pic_bypass_encdec;
     }
     // Post the results to the MD processes
     uint16_t tg_count = pcs->ppcs->tile_group_cols * pcs->ppcs->tile_group_rows;
