@@ -25,9 +25,9 @@ They are built from the unmodified sources in the packages `hwcodec-libvpx-src`,
 `hwcodec-svt-av1-src`, `hwcodec-dav1d-src` and `hwcodec-libvpl-src` by the workflow "Windows codec
 libraries" of the hwcodec repository (`.github/workflows/native-libs.yml`, script
 `.github/scripts/build-windows-libs.sh`) and published as one archive in a GitHub release named
-`native-libs-<number>`. The number is the last part of this package's version: `0.1.0+native-libs.2`
+`native-libs-<number>`. The number is the last part of this package's version: `0.1.0+native-libs.3`
 holds the archive of
-[`native-libs-2`](https://github.com/Mumcord/hwcodec/releases/tag/native-libs-2). That release
+[`native-libs-3`](https://github.com/Mumcord/hwcodec/releases/tag/native-libs-3). That release
 states the commit and the workflow run that built the archive, and its SHA-256.
 
 `prebuilt/` is that archive, unpacked. To verify it, download the archive from the release, check

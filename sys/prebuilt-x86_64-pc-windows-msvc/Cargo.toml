@@ -4,7 +4,7 @@ description = "Prebuilt static libvpx, SVT-AV1, dav1d and Intel VPL dispatcher f
 # The part after the plus sign names the `native-libs` release of the hwcodec repository whose
 # archive the `prebuilt/` directory is unpacked from. It moves together with `PREBUILT_TAG` in
 # hwcodec's build.rs.
-version = "0.1.0+native-libs.2"
+version = "0.1.0+native-libs.3"
 edition = "2024"
 rust-version = "1.90"
 license = "BSD-3-Clause AND BSD-3-Clause-Clear AND BSD-2-Clause AND MIT"

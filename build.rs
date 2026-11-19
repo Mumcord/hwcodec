@@ -735,7 +735,7 @@ const PREBUILT_TARGET: &str = "x86_64-pc-windows-msvc";
 /// [`PREBUILT_TARGET`]: one prefix per library, named like [`name_directory`] names it, built by
 /// `.github/scripts/build-windows-libs.sh` from the bundled sources. RELEASING.md describes how
 /// a new one is published.
-const PREBUILT_TAG: &str = "native-libs-2";
+const PREBUILT_TAG: &str = "native-libs-3";
 
 /// The SHA-256 of the archive at [`prebuilt_url`]. Nothing else is ever unpacked or linked.
 ///
@@ -748,7 +748,7 @@ const PREBUILT_TAG: &str = "native-libs-2";
 /// them without any download. The download only happens on Windows, only when that package
 /// holds no libraries (a git checkout or a path dependency), only for a library whose variable
 /// (`LIBVPX_STATIC_DIR`, ...) is unset, and never with `HWCODEC_NO_DOWNLOAD=1`.
-const PREBUILT_SHA256: &str = "c97b21064a36b3f92326c785a6c97f4880db9d05484ba1e7d83125f06f10ad02";
+const PREBUILT_SHA256: &str = "f860474a64500942f27d2cf0bf797dac93ab3c4f2fe07714ed5f6c837841e323";
 
 /// Where the archive of [`PREBUILT_TAG`] is downloaded from.
 fn prebuilt_url() -> String {
