@@ -358,10 +358,10 @@ fn link_vpl_dispatcher() {
 fn find(lib: &Library, version: &str, build: impl FnOnce() -> Recipe) -> Vec<PathBuf> {
     println!("cargo:rerun-if-env-changed={}", lib.env);
     if let Some(dir) = env::var_os(lib.env) {
-        return link_static(lib, Path::new(&dir));
+        return link_static(lib, Path::new(&dir), version);
     }
     if !use_system_libs() {
-        return link_static(lib, &bundled(lib.name, lib.env, version, build));
+        return link_static(lib, &bundled(lib.name, lib.env, version, build), version);
     }
     pkg_config::Config::new()
         .atleast_version(lib.min_version)
@@ -379,7 +379,7 @@ fn find(lib: &Library, version: &str, build: impl FnOnce() -> Recipe) -> Vec<Pat
 
 /// Links the static library in `dir` and returns its include path.
 #[cfg(any(feature = "libvpx", feature = "svt-av1", feature = "dav1d"))]
-fn link_static(lib: &Library, dir: &Path) -> Vec<PathBuf> {
+fn link_static(lib: &Library, dir: &Path, version: &str) -> Vec<PathBuf> {
     let include = dir.join("include");
     let lib_dir = dir.join("lib");
     // MSVC names static libraries `name.lib`, every other toolchain `libname.a`.
@@ -397,11 +397,83 @@ fn link_static(lib: &Library, dir: &Path) -> Vec<PathBuf> {
             lib.name
         );
     }
+    check_prefix_version(lib, dir, version);
     // A rebuilt library at the same path (cache refresh) must relink.
     println!("cargo:rerun-if-changed={}", archive.display());
     println!("cargo:rustc-link-search=native={}", lib_dir.display());
     println!("cargo:rustc-link-lib=static={}", lib.link);
     vec![include]
+}
+
+/// Stops when a static prefix was built from an older version of `lib` than hwcodec bundles.
+///
+/// Nothing else notices: the header and the archive of an old prefix look exactly like current
+/// ones, so a `SVTAV1_STATIC_DIR` left over from before an update keeps linking the old library.
+/// That is how SVT-AV1 4.2.0 survived the 4.3.0 update on developer machines and crashed on
+/// x86 CPUs without AVX2. A newer prefix is only a warning, since the ABI the crate needs is
+/// there.
+#[cfg(any(feature = "libvpx", feature = "svt-av1", feature = "dav1d"))]
+fn check_prefix_version(lib: &Library, dir: &Path, version: &str) {
+    let Some(found) = prefix_version(lib, dir) else {
+        return;
+    };
+    if found == version {
+        return;
+    }
+    assert!(
+        !older_than(&found, version),
+        "{}: {} holds {found}, but hwcodec bundles {version}. Rebuild the prefix (its build script), \
+         or set {} to a prefix built from {version}.",
+        lib.name,
+        dir.display(),
+        lib.env
+    );
+    println!(
+        "cargo:warning={}: {} holds {found}, hwcodec bundles {version}",
+        lib.name,
+        dir.display()
+    );
+}
+
+/// The version a static prefix reports: a `VERSION` file at its root (the layout
+/// `.github/scripts/build-windows-libs.sh` writes) or the pkg-config file a `cmake --install` or
+/// `meson install` prefix carries. `None` when neither says it, as with a hand-built prefix.
+#[cfg(any(feature = "libvpx", feature = "svt-av1", feature = "dav1d"))]
+fn prefix_version(lib: &Library, dir: &Path) -> Option<String> {
+    if let Ok(version) = fs::read_to_string(dir.join("VERSION")) {
+        let version = version.trim();
+        if !version.is_empty() {
+            return Some(version.to_owned());
+        }
+    }
+    let pc = dir
+        .join("lib/pkgconfig")
+        .join(format!("{}.pc", lib.pkg_config));
+    let text = fs::read_to_string(pc).ok()?;
+    let version = text
+        .lines()
+        .find_map(|line| line.strip_prefix("Version:"))?
+        .trim();
+    Some(version.to_owned())
+}
+
+/// Whether `found` is an older version than `want`. Compares numerically and treats anything after
+/// the digits of a part as irrelevant (`4.3.0-rc1` counts as `4.3.0`).
+#[cfg(any(feature = "libvpx", feature = "svt-av1", feature = "dav1d"))]
+fn older_than(found: &str, want: &str) -> bool {
+    let parts = |version: &str| {
+        let mut parts = [0u64; 3];
+        for (slot, part) in parts.iter_mut().zip(version.split('.')) {
+            let digits: String = part
+                .trim()
+                .chars()
+                .take_while(char::is_ascii_digit)
+                .collect();
+            *slot = digits.parse().unwrap_or(0);
+        }
+        parts
+    };
+    parts(found) < parts(want)
 }
 
 #[cfg(any(

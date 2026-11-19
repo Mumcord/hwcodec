@@ -8,6 +8,7 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 - Software AV1 now works on x86 CPUs without AVX2. The bundled SVT-AV1 is updated from 4.2.0 to 4.3.0, which fixes the unaligned load in the SSE/SSSE3 sub-pixel variance kernels that such CPUs pick: 4.2.0 killed the whole process with a general protection fault in the middle of an encode. `Av1Encoder::new` no longer refuses those CPUs, and `av1_cpu_supported` always reports `true`; callers that check it can drop the check (the function goes away with the next breaking release).
 - `selftest::measure_av1` fails a machine that cannot finish a single frame inside its time limit instead of passing it. A warm-up frame that ran out the limit on its own left no timed frame, and the result was reported as 0 % of the frame budget, that is, as fast.
+- A static prefix (`SVTAV1_STATIC_DIR`, `LIBVPX_STATIC_DIR`, `DAV1D_STATIC_DIR`) built from an older version of its library is refused at build time instead of being linked silently. The header and archive of an old prefix look exactly like current ones, so a leftover SVT-AV1 4.2.0 prefix kept the crash on x86 CPUs without AVX2 while the build looked healthy. A prefix with a newer version only warns, and one that names no version at all is linked as before.
 
 ## [0.1.0] - 2026-11-15
 
