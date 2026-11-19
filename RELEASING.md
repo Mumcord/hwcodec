@@ -11,7 +11,7 @@ A release publishes six packages to crates.io and creates a GitHub release. The 
 | `hwcodec-svt-av1-src` | `sys/svt-av1-src` | `0.1.0+4.3.0`   |
 | `hwcodec-dav1d-src`   | `sys/dav1d-src`   | `0.1.0+1.5.4`   |
 | `hwcodec-libvpl-src`  | `sys/libvpl-src`  | `0.1.0+2.17.0`  |
-| `hwcodec-prebuilt-x86_64-pc-windows-msvc` | `sys/prebuilt-x86_64-pc-windows-msvc` | `0.1.0+native-libs.1` |
+| `hwcodec-prebuilt-x86_64-pc-windows-msvc` | `sys/prebuilt-x86_64-pc-windows-msvc` | `0.1.0+native-libs.2` |
 
 All six always carry the same version. The four source packages add the version of the library they bundle after a plus sign; that part only changes when the bundled library is updated. The package with the prebuilt Windows libraries adds the `native-libs` release its libraries come from (see "Windows: the prebuilt codec libraries").
 
