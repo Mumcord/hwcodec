@@ -46,6 +46,17 @@ pub fn measure_av1(
     fps: u32,
     options: Av1Options,
 ) -> Result<SelftestResult> {
+    measure_av1_within(width, height, fps, options, TIME_LIMIT)
+}
+
+/// [`measure_av1`] with the time limit the caller picks; the tests run out on the warm-up frame.
+fn measure_av1_within(
+    width: u32,
+    height: u32,
+    fps: u32,
+    options: Av1Options,
+    time_limit: Duration,
+) -> Result<SelftestResult> {
     if fps == 0 {
         return Err(Error::InvalidConfig("0 frames per second".into()));
     }
@@ -71,11 +82,18 @@ pub fn measure_av1(
             timed += took;
             frames += 1;
         }
-        if started.elapsed() > TIME_LIMIT {
+        if started.elapsed() > time_limit {
             break;
         }
     }
-    let average_frame_time = timed / frames.max(1);
+    // No timed frame means the warm-up frame alone blew the limit: the machine cannot encode a
+    // single frame in real time. Dividing by zero frames would report 0 % of the budget, that is,
+    // "fast"; the time the warm-up frame took is the honest estimate instead, and it fails.
+    let average_frame_time = if frames == 0 {
+        started.elapsed()
+    } else {
+        timed / frames
+    };
     let budget_percent = (average_frame_time.as_secs_f64() * f64::from(fps) * 100.0) as f32;
     let result = SelftestResult {
         budget_percent,
@@ -114,6 +132,23 @@ mod tests {
         assert!((f64::from(result.budget_percent) - budget).abs() < 0.01);
         assert_eq!(result.passed, result.passes_at(DEFAULT_PASS_PERCENT));
         assert!(started.elapsed() < TIME_LIMIT + Duration::from_secs(2));
+    }
+
+    #[test]
+    fn a_warm_up_frame_that_runs_the_limit_out_is_reported() {
+        // A time limit of zero means no frame is timed at all. Dividing by zero frames reported
+        // 0 ms and 0 % of the budget, that is, "fast"; the warm-up frame's own time is what the
+        // caller has to see. Whether that time is over the budget depends on the machine, so
+        // only the reported time is asserted here.
+        let started = Instant::now();
+        let result = measure_av1_within(854, 480, 15, Av1Options::default(), Duration::ZERO)
+            .expect("SVT-AV1 runs");
+        assert!(
+            result.average_frame_time > Duration::ZERO,
+            "a warm-up frame that used up the limit must not read as 0 ms"
+        );
+        assert!(result.budget_percent > 0.0);
+        assert!(result.average_frame_time <= started.elapsed());
     }
 
     #[test]
