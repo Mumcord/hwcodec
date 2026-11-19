@@ -9,7 +9,7 @@ A release publishes six packages to crates.io and creates a GitHub release. The 
 | `hwcodec`             | repository root   | `0.1.0`         |
 | `hwcodec-libvpx-src`  | `sys/libvpx-src`  | `0.1.0+1.15.2`  |
 | `hwcodec-svt-av1-src` | `sys/svt-av1-src` | `0.1.0+4.3.0`   |
-| `hwcodec-dav1d-src`   | `sys/dav1d-src`   | `0.1.0+1.5.4`   |
+| `hwcodec-dav1d-src`   | `sys/dav1d-src`   | `0.1.0+1.5.5`   |
 | `hwcodec-libvpl-src`  | `sys/libvpl-src`  | `0.1.0+2.17.0`  |
 | `hwcodec-prebuilt-x86_64-pc-windows-msvc` | `sys/prebuilt-x86_64-pc-windows-msvc` | `0.1.0+native-libs.2` |
 

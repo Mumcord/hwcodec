@@ -1,7 +1,7 @@
 [package]
 name = "hwcodec-dav1d-src"
-description = "Source code of dav1d 1.5.4, bundled for the hwcodec crate's build"
-version = "0.1.0+1.5.4"
+description = "Source code of dav1d 1.5.5, bundled for the hwcodec crate's build"
+version = "0.1.0+1.5.5"
 edition = "2024"
 rust-version = "1.90"
 license = "BSD-2-Clause"
